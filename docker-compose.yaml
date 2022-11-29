@@ -1,0 +1,29 @@
+version: "2.4"
+
+services:
+  dev: &dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: omron-sinicx/jaxman
+    container_name: ${USER}.jaxman
+    volumes:
+      - ${PWD}:/workspace
+    tty: true
+    stdin_open: true
+    ports:
+      - 8888:8888
+      - 6006:6006
+    command: /bin/bash
+
+  # pip install --upgrade "jax[cuda]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+  dev-gpu:
+    <<: *dev
+    runtime: nvidia
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - TF_FORCE_GPU_ALLOW_GROWTH=true
+      - XLA_PYTHON_CLIENT_MEM_FRACTION=0.5  # necessary to avoid cudnn error
+    volumes:
+      - $PWD:/workspace
+    
