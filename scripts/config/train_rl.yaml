@@ -1,0 +1,13 @@
+seed: 0
+seed_start: 0
+seed_end: 1
+
+defaults:
+  - _self_
+  - model: sac
+  - train: sac
+  - env: random
+
+hydra:
+  run:
+    dir: results/${env.name}_n${env.num_agents}_level${env.level}/${model.name}_${now:%Y-%m-%d_%H-%M-%S}
