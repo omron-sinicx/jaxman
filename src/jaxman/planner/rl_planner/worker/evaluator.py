@@ -95,8 +95,8 @@ class Evaluator:
                     (state_traj, jnp.expand_dims(last_state, axis=0))
                 )
                 dones = carry.experience.dones[:steps, :]
-                last_dones = jnp.ones_like(dones[0], dtype=bool)
-                dones = jnp.vstack((dones, jnp.expand_dims(last_dones, 0)))
+                first_dones = jnp.zeros_like(dones[0], dtype=bool)
+                dones = jnp.vstack((jnp.expand_dims(first_dones, 0), dones))
                 animation = render_gif(
                     state_traj,
                     carry.task_info.goals,

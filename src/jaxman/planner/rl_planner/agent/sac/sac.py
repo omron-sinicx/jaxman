@@ -10,9 +10,9 @@ from typing import Dict, Tuple, Union
 import jax
 import jax.numpy as jnp
 from chex import PRNGKey
+from flax.training import checkpoints
 from flax.training.train_state import TrainState
-from gym.spaces.box import Box
-from gym.spaces.discrete import Discrete
+from gym.spaces import Box, Dict, Discrete
 from jaxman.planner.rl_planner.memory.dataset import TrainBatch
 from omegaconf import DictConfig
 
@@ -26,7 +26,7 @@ from .temperature import update as update_temperature
 
 
 def create_sac_agent(
-    observation_space: Box,
+    observation_space: Dict,
     action_space: Union[Box, Discrete],
     model_config: DictConfig,
     key: PRNGKey,
@@ -34,7 +34,7 @@ def create_sac_agent(
     """create sac agent
 
     Args:
-        observation_space (Box): agent observation space
+        observation_space (Dict): agent observation space
         action_space (Union[Box, Discrete]): agent action space
         model_config (DictConfig): model configurations
         key (PRNGKey): random variable key
@@ -50,6 +50,44 @@ def create_sac_agent(
     )
     temp = create_temp(model_config, temp_key)
     return actor, critic, target_critic, temp, key
+
+
+def restore_sac_actor(
+    actor: TrainState,
+    is_discrete: bool,
+    is_diff_drive: bool,
+    restore_dir: str,
+) -> Tuple[TrainState, TrainState, TrainState, TrainState]:
+    """restore pretrained model
+
+    Args:
+        actor (TrainState): TrainState of actor
+        is_discrete (bool): whether agent has discrete action space
+        is_diff_drive (bool): whether agent has diff drive action space
+        restore_dir (str): path to restore agent files in.
+
+    Returns:
+        Tuple[TrainState]: restored actor
+    """
+    if not is_discrete:
+        actor_params = checkpoints.restore_checkpoint(
+            ckpt_dir=restore_dir,
+            target=actor,
+            prefix="continuous_actor",
+        ).params
+    elif is_diff_drive:
+        actor_params = checkpoints.restore_checkpoint(
+            ckpt_dir=restore_dir,
+            target=actor,
+            prefix="diff_drive_actor",
+        ).params
+    else:
+        actor_params = checkpoints.restore_checkpoint(
+            ckpt_dir=restore_dir,
+            target=actor,
+            prefix="grid_actor",
+        ).params
+    return actor.replace(params=actor_params)
 
 
 @partial(

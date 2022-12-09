@@ -13,8 +13,7 @@ import optax
 from chex import Array, PRNGKey, assert_shape
 from flax.core.frozen_dict import FrozenDict
 from flax.training.train_state import TrainState
-from gym.spaces.box import Box
-from gym.spaces.discrete import Discrete
+from gym.spaces import Box, Dict, Discrete
 from jaxman.planner.rl_planner.memory.dataset import TrainBatch
 from omegaconf import DictConfig
 
@@ -23,7 +22,7 @@ from ..model.discrete_model import DoubleCritic as DiscreteCritic
 
 
 def create_critic(
-    observation_space: Box,
+    observation_space: Dict,
     action_space: Union[Box, Discrete],
     config: DictConfig,
     key: PRNGKey,
@@ -32,25 +31,31 @@ def create_critic(
     create actor TrainState
 
     Args:
-        observation_space (Box): observation_space of single agent
-        action_space (Box): action_space of single agent
+        observation_space (Dict): observation space
+        action_space (Box): action space
         config (DictConfig): configuration of actor
         key (PRNGKey): PRNGKey for actor
 
     Returns:
         TrainState: actor TrainState
     """
-    obs_dim = observation_space.shape[0]
+    obs_dim = observation_space["obs"].shape[0]
+    comm_dim = observation_space["comm"].shape
     if isinstance(action_space, Box):
         action_dim = action_space.shape[0]
-        critic_fn = ContinuousCritic(config.hidden_dim)
-        params = critic_fn.init(key, jnp.ones([1, obs_dim]), jnp.ones([1, action_dim]))[
-            "params"
-        ]
+        critic_fn = ContinuousCritic(config.hidden_dim, config.msg_dim)
+        params = critic_fn.init(
+            key,
+            jnp.ones([1, obs_dim]),
+            jnp.ones([1, *comm_dim]),
+            jnp.ones([1, action_dim]),
+        )["params"]
     else:
         action_dim = action_space.n
-        critic_fn = DiscreteCritic(config.hidden_dim, action_dim)
-        params = critic_fn.init(key, jnp.ones([1, obs_dim]))["params"]
+        critic_fn = DiscreteCritic(config.hidden_dim, config.msg_dim, action_dim)
+        params = critic_fn.init(key, jnp.ones([1, obs_dim]), jnp.ones([1, *comm_dim]))[
+            "params"
+        ]
 
     lr_rate_schedule = optax.cosine_decay_schedule(
         config.actor_lr, config.decay_steps, config.decay_alpha
@@ -115,6 +120,7 @@ def update(
         next_dist = actor.apply_fn(
             {"params": actor.params},
             batch.next_observations,
+            batch.next_communications,
         )
 
         next_action_probs = next_dist.probs
@@ -123,7 +129,9 @@ def update(
         next_log_probs = jnp.log(next_action_probs)
 
         next_q1, next_q2 = target_critic.apply_fn(
-            {"params": target_critic.params}, batch.next_observations
+            {"params": target_critic.params},
+            batch.next_observations,
+            batch.next_communications,
         )
         next_q = jnp.minimum(next_q1, next_q2)
         temp = temperature.apply_fn({"params": temperature.params})
@@ -138,6 +146,7 @@ def update(
         q1, q2 = critic.apply_fn(
             {"params": params},
             batch.observations,
+            batch.communications,
         )
         q1 = jax.vmap(lambda q_values, i: q_values[i])(q1, batch.actions)
         q2 = jax.vmap(lambda q_values, i: q_values[i])(q2, batch.actions)
@@ -155,12 +164,16 @@ def update(
         dist = actor.apply_fn(
             {"params": actor.params},
             batch.next_observations,
+            batch.next_communications,
         )
         next_actions = dist.sample(seed=key)
         next_log_probs = dist.log_prob(next_actions)
 
         next_q1, next_q2 = target_critic.apply_fn(
-            {"params": target_critic.params}, batch.next_observations, next_actions
+            {"params": target_critic.params},
+            batch.next_observations,
+            batch.next_communications,
+            next_actions,
         )
         next_q = jnp.squeeze(jnp.minimum(next_q1, next_q2))
 
@@ -169,7 +182,9 @@ def update(
             next_q - next_log_probs * temp
         )
 
-        q1, q2 = critic.apply_fn({"params": params}, batch.observations, batch.actions)
+        q1, q2 = critic.apply_fn(
+            {"params": params}, batch.observations, batch.communications, batch.actions
+        )
         td_error = (jnp.squeeze(q1) - target_q) ** 2 + (jnp.squeeze(q2) - target_q) ** 2
         assert_shape(td_error, (batch_size,))
         critic_loss = td_error.mean()

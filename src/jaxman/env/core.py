@@ -1,6 +1,11 @@
+"""Data structures for JaxMANEnv
+
+Author: Hikaru Asano
+Affiliation: OMRON SINIC X / University of Tokyo
+"""
 from __future__ import annotations
 
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Tuple
 
 import chex
 import jax
@@ -21,6 +26,7 @@ class EnvInfo(NamedTuple):
     fov_r: int
     num_scans: int
     scan_range: float
+    num_comm_agents: int
     timeout: int
     goal_reward: float
     crash_penalty: float
@@ -211,6 +217,7 @@ class AgentObservation(NamedTuple):
     goals: Optional[Array] = None
     scans: Optional[Array] = None
     planner_act: Optional[Array] = None
+    communications: Optional[Array] = None
 
     def cat(self, as_numpy=False) -> Array:
         """
@@ -232,10 +239,31 @@ class AgentObservation(NamedTuple):
         )
         if self.planner_act is not None:
             ret = jnp.hstack((ret, self.planner_act))
+        if self.communications is not None:
+            num_agents = ret.shape[0]
+            comm = self.communications.reshape([num_agents, -1])
+            ret = jnp.hstack((ret, comm))
 
         if as_numpy:
             ret = np.array(ret)
         return ret
+
+    def split_obs_comm(self) -> Tuple[Array, Array]:
+        ret_state = self.state.cat()
+        ret = jnp.hstack(
+            (
+                ret_state,
+                self.goals,
+                self.scans,
+            )
+        )
+        if self.planner_act is not None:
+            obs = jnp.hstack((ret, self.planner_act))
+        else:
+            obs = ret
+        comm = self.communications
+
+        return obs, comm
 
     def is_valid(self) -> None:
         # (n_agents, 2)

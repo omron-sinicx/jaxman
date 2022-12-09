@@ -60,6 +60,9 @@ class Instance:
         self.fov_r = config.fov_r
         self.num_scans = config.num_scans
         self.scan_range = config.scan_range
+        self.num_comm_agents = jnp.minimum(
+            config.num_comm_agents, config.num_agents - 1
+        ).astype(int)
         self.timeout = config.timeout
         self.goal_reward = config.goal_reward
         self.crash_penalty = config.crash_penalty
@@ -109,6 +112,7 @@ class Instance:
             fov_r=int(self.fov_r),
             num_scans=int(self.num_scans),
             scan_range=float(self.scan_range),
+            num_comm_agents=int(self.num_comm_agents),
             timeout=int(self.timeout),
             goal_reward=self.goal_reward,
             crash_penalty=self.crash_penalty,

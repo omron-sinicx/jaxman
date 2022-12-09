@@ -6,10 +6,11 @@ Affiliation: OMRON SINIC X / University of Tokyo
 
 import threading
 import time
+from typing import Union
 
 import jax
 import ray
-from gym.spaces.box import Box
+from gym.spaces import Box, Dict, Discrete
 from omegaconf.dictconfig import DictConfig
 
 from ..memory.dataset import Buffer, Experience, TrainBatch
@@ -18,13 +19,18 @@ from ..memory.utils import _push_experience_to_buffer, _sample_experience
 
 @ray.remote(num_cpus=1, num_gpus=0)
 class GlobalBuffer(Buffer):
-    def __init__(self, observation_space: Box, action_space: Box, config: DictConfig):
+    def __init__(
+        self,
+        observation_space: Dict,
+        action_space: Union[Discrete, Box],
+        config: DictConfig,
+    ):
         """
         replay buffer
 
         Args:
-            observation_space (Box): observation space
-            action_space (Box): action space
+            observations_space (Dict): observation space
+            actions (Union[Discrete, Box]): action space
             config (DictConfig): configuration
         """
         super().__init__(
@@ -106,6 +112,8 @@ class GlobalBuffer(Buffer):
             TrainBatch: sampled batch data
         """
         with self.lock:
-            data = _sample_experience(self, batch_size)
+            data = _sample_experience(
+                self, batch_size, self.num_comm_agents, self.comm_dim
+            )
             self.frame += 1
             return data

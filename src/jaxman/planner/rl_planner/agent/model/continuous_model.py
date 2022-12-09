@@ -6,9 +6,11 @@ Affiliation: OMRON SINIC X / University of Tokyo
 
 import flax.linen as fnn
 import jax.numpy as jnp
-from chex import Array, assert_shape
+from chex import Array
 from flax import linen as fnn
 from tensorflow_probability.substrates import jax as tfp
+
+from .base_model import ObsActEncoder, ObsEncoder
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
@@ -21,11 +23,13 @@ epsilon = 10e-7
 
 class Critic(fnn.Module):
     hidden_dim: int
+    msg_dim: int
 
     @fnn.compact
     def __call__(
         self,
         observations: Array,
+        communications: Array,
         actions: Array,
     ) -> Array:
         """
@@ -33,37 +37,36 @@ class Critic(fnn.Module):
 
         Args:
             observations (Array): observations. shape: (batch_size, obs_dim)
+            communications (Array): communications with neighbor agents. shape: (batch_size, num_comm_agents, comm_dim)
             actions (Array): agent actions. shape: (batch_size, action_dim)
 
         Returns:
             Array: q value
         """
-        batch_size = observations.shape[0]
+        # encode observation, communications and action
+        encoder = ObsActEncoder(self.hidden_dim, self.msg_dim)
+        h = encoder(observations, communications, actions)
 
-        inputs = jnp.concatenate([observations, actions], axis=-1)
-
-        h_obs = fnn.Dense(self.hidden_dim)(inputs)
-        h_obs = fnn.relu(h_obs)
-        h_obs = fnn.Dense(self.hidden_dim)(h_obs)
-        h_obs = fnn.relu(h_obs)
-
-        q_values = fnn.Dense(self.hidden_dim)(h_obs)
-        q_values = fnn.relu(q_values)
-        q_values = fnn.Dense(1)(q_values)
-        assert_shape(q_values, (batch_size, 1))
+        h = fnn.Dense(self.hidden_dim)(h)
+        h = fnn.relu(h)
+        q_values = fnn.Dense(1)(h)
 
         return q_values
 
 
 class DoubleCritic(fnn.Module):
     hidden_dim: int
+    msg_dim: int
 
     @fnn.compact
-    def __call__(self, observations: Array, actions: Array) -> Array:
+    def __call__(
+        self, observations: Array, communications: Array, actions: Array
+    ) -> Array:
         """calculate double q
 
         Args:
             observations (Array): agent observation
+            communications (Array): communications with neighbor agents.
             actions (Array): agent action
 
         Returns:
@@ -77,7 +80,9 @@ class DoubleCritic(fnn.Module):
             out_axes=0,
             axis_size=2,
         )
-        qs = VmapCritic(self.hidden_dim)(observations, actions)
+        qs = VmapCritic(self.hidden_dim, self.msg_dim)(
+            observations, communications, actions
+        )
         q1 = qs[0]
         q2 = qs[1]
         return q1, q2
@@ -85,6 +90,7 @@ class DoubleCritic(fnn.Module):
 
 class Actor(fnn.Module):
     hidden_dim: int
+    msg_dim: int
     action_dim: int
     log_std_min: float = None
     log_std_max: float = None
@@ -93,21 +99,24 @@ class Actor(fnn.Module):
     def __call__(
         self,
         observations: Array,
+        communications: Array,
     ) -> Array:
         """
         calculate agent action distribution
 
         Args:
             observations (Array): observations. shape: (batch_size, obs_dim)
+            communications (Array): communications with neighbor agents. shape: (batch_size, num_comm_agents, comm_dim)
 
         Returns:
             Array: action distribution
         """
-        h_obs = fnn.Dense(self.hidden_dim)(observations)
-        h_obs = fnn.relu(h_obs)
+        # encode observation, communications and action
+        encoder = ObsEncoder(self.hidden_dim, self.msg_dim)
+        h = encoder(observations, communications)
 
         # mean
-        means = fnn.Dense(self.hidden_dim)(h_obs)
+        means = fnn.Dense(self.hidden_dim)(h)
         means = fnn.relu(means)
         means = fnn.Dense(self.action_dim)(means)
 
@@ -119,7 +128,7 @@ class Actor(fnn.Module):
         x_t = jnp.arctanh(planner_act)
         means = jnp.tanh(means + x_t)
 
-        log_stds = fnn.Dense(self.hidden_dim)(h_obs)
+        log_stds = fnn.Dense(self.hidden_dim)(h)
         log_stds = fnn.relu(log_stds)
         log_stds = fnn.Dense(self.action_dim)(log_stds)
 

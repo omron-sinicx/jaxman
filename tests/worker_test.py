@@ -68,14 +68,17 @@ def test_update(setup):
     # Discrete Env
     config.is_discrete = True
     env = JaxMANEnv(config)
-    buffer = Buffer(env.observation_space, env.action_space, capacity)
+    obs_space = env.observation_space
+    buffer = Buffer(obs_space, env.action_space, capacity)
     buffer.size = capacity
     actor, critic, target_critic, temp, key = create_sac_agent(
-        env.observation_space, env.action_space, model_config, key
+        obs_space, env.action_space, model_config, key
     )
 
     # update
-    data = _sample_experience(buffer, 10)
+    data = _sample_experience(
+        buffer, 10, obs_space["comm"].shape[0], obs_space["comm"].shape[1]
+    )
     results = _update_sac_jit(
         key,
         actor,
@@ -96,14 +99,17 @@ def test_update(setup):
     config.is_discrete = False
     config.map_size = 128
     env = JaxMANEnv(config)
-    buffer = Buffer(env.observation_space, env.action_space, capacity)
+    obs_space = env.observation_space
+    buffer = Buffer(obs_space, env.action_space, capacity)
     buffer.size = capacity
     actor, critic, target_critic, temp, key = create_sac_agent(
-        env.observation_space, env.action_space, model_config, key
+        obs_space, env.action_space, model_config, key
     )
 
     # update
-    data = _sample_experience(buffer, 10)
+    data = _sample_experience(
+        buffer, 10, obs_space["comm"].shape[0], obs_space["comm"].shape[1]
+    )
     results = _update_sac_jit(
         key,
         actor,
