@@ -64,7 +64,7 @@ class Carry(NamedTuple):
             vel=jnp.zeros_like(task_info.start_rots),
             ang=jnp.zeros_like(task_info.start_rots),
         )
-        observations = _observe(state, task_info).cat()
+        observations = _observe(state, task_info)
         trial_info = TrialInfo().reset(env_info.num_agents)
         rewards = jnp.zeros((num_agents,))
         dones = jnp.array([False] * num_agents)
@@ -76,7 +76,7 @@ class Carry(NamedTuple):
         experience = Experience.reset(
             num_agents,
             env_info.timeout,
-            observations,
+            observations.cat(),
             actions,
         )
         return self(
@@ -148,11 +148,11 @@ def build_rollout_episode(
                 carry.state, actions, carry.task_info, carry.trial_info
             )
             next_state = next_observations.state
-            next_observation = _observe(next_state, carry.task_info).cat()
+            next_observation = _observe(next_state, carry.task_info)
 
             rewards = carry.rewards + rews
             experience = carry.experience.push(
-                carry.episode_steps, carry.observations, actions, rews, dones
+                carry.episode_steps, carry.observations.cat(), actions, rews, dones
             )
 
             carry = Carry(

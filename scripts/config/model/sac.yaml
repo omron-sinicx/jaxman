@@ -1,5 +1,6 @@
 name: sac
 hidden_dim: 256
+msg_dim: 32
 # model optimization
 actor_lr: 0.001
 critic_lr: 0.001

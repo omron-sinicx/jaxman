@@ -8,22 +8,21 @@ from typing import NamedTuple, Union
 import jax.numpy as jnp
 import numpy as np
 from chex import Array
-from gym.spaces.box import Box
-from gym.spaces.discrete import Discrete
+from gym.spaces import Box, Dict, Discrete
 
 
 class Buffer:
     def __init__(
         self,
-        observation_space: Box,
-        action_space: Union[Box, Discrete],
+        observation_space: Dict,
+        action_space: Union[Discrete, Box],
         capacity: int = 10e7,
     ):
         """
         replay buffer
 
         Args:
-            observation_space (Box): observation space
+            observation_space (Dict): observation space
             action_space (Union[Box, Discrete]): action space
             capacity (int): buffer capacity
         """
@@ -38,30 +37,34 @@ class Buffer:
         else:
             self.act_dim = action_space.shape
 
-        self.obs_dim = observation_space.shape[0]
+        self.obs_dim = observation_space["obs"].shape[0]
+        self.num_comm_agents = observation_space["comm"].shape[0]
+        self.comm_dim = observation_space["comm"].shape[1]
 
+        total_obs_dim = self.obs_dim + self.num_comm_agents * self.comm_dim
         # buffer
         self.capacity = int(capacity)
         self.observations = np.zeros(
-            (self.capacity, self.obs_dim), dtype=self.observation_space.dtype
+            (self.capacity, total_obs_dim), dtype=observation_space["obs"].dtype
         )
         self.actions = np.zeros(
-            (self.capacity, *self.act_dim), dtype=self.action_space.dtype
+            (self.capacity, *self.act_dim), dtype=action_space.dtype
         )
         self.rewards = np.zeros((self.capacity,), dtype=np.float32)
         self.masks = np.zeros((self.capacity,), dtype=np.float32)
-        self.dones_float = np.zeros((self.capacity,), dtype=np.float32)
         self.next_observations = np.zeros(
-            (self.capacity, self.obs_dim), dtype=self.observation_space.dtype
+            (self.capacity, total_obs_dim), dtype=observation_space["obs"].dtype
         )
 
 
 class TrainBatch(NamedTuple):
     observations: Array
+    communications: Array
     actions: Array
     rewards: Array
     masks: Array
     next_observations: Array
+    next_communications: Array
 
 
 class Experience(NamedTuple):

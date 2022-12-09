@@ -13,8 +13,7 @@ import optax
 from chex import Array, PRNGKey, assert_shape
 from flax.core.frozen_dict import FrozenDict
 from flax.training.train_state import TrainState
-from gym.spaces.box import Box
-from gym.spaces.discrete import Discrete
+from gym.spaces import Box, Dict, Discrete
 from jaxman.planner.rl_planner.memory.dataset import TrainBatch
 from omegaconf import DictConfig
 
@@ -23,7 +22,7 @@ from ..model.discrete_model import Actor as DiscreteActor
 
 
 def create_actor(
-    observation_space: Box,
+    observation_space: Dict,
     action_space: Union[Box, Discrete],
     config: DictConfig,
     key: PRNGKey,
@@ -32,23 +31,26 @@ def create_actor(
     create actor TrainState
 
     Args:
-        observation_space (Box): observation_space of single agent
-        action_space (Box): action_space of single agent
+        observation_space (Dict): observation space
+        action_space (Box): action space
         config (DictConfig): configuration of actor
         key (PRNGKey): PRNGKey for actor
 
     Returns:
         TrainState: actor TrainState
     """
-    obs_dim = observation_space.shape[0]
+    obs_dim = observation_space["obs"].shape[0]
+    comm_dim = observation_space["comm"].shape
     if isinstance(action_space, Box):
         action_dim = action_space.shape[0]
-        actor_fn = ContinuousActor(config.hidden_dim, action_dim)
+        actor_fn = ContinuousActor(config.hidden_dim, config.msg_dim, action_dim)
     else:
         action_dim = action_space.n
-        actor_fn = DiscreteActor(config.hidden_dim, action_dim)
+        actor_fn = DiscreteActor(config.hidden_dim, config.msg_dim, action_dim)
 
-    params = actor_fn.init(key, jnp.ones([1, obs_dim]))["params"]
+    params = actor_fn.init(key, jnp.ones([1, obs_dim]), jnp.ones([1, *comm_dim]))[
+        "params"
+    ]
 
     lr_rate_schedule = optax.cosine_decay_schedule(
         config.actor_lr, config.decay_steps, config.decay_alpha
@@ -88,6 +90,7 @@ def update(
         dist = actor.apply_fn(
             {"params": actor_params},
             batch.observations,
+            batch.communications,
         )
 
         action_probs = dist.probs
@@ -96,7 +99,9 @@ def update(
         log_probs = jnp.log(action_probs)
         entropy = -jnp.sum(action_probs * log_probs, axis=-1)
 
-        q1, q2 = critic.apply_fn({"params": critic.params}, batch.observations)
+        q1, q2 = critic.apply_fn(
+            {"params": critic.params}, batch.observations, batch.communications
+        )
         q = jnp.minimum(q1, q2)
         temp = temperature.apply_fn({"params": temperature.params})
         actor_loss = jnp.sum((action_probs * (temp * log_probs - q)), axis=-1)
@@ -109,11 +114,14 @@ def update(
         dist = actor.apply_fn(
             {"params": actor_params},
             batch.observations,
+            batch.communications,
         )
         actions = dist.sample(seed=key)
         log_probs = dist.log_prob(actions)
 
-        q1, q2 = critic.apply_fn({"params": critic.params}, batch.observations, actions)
+        q1, q2 = critic.apply_fn(
+            {"params": critic.params}, batch.observations, batch.communications, actions
+        )
         q = jnp.squeeze(jnp.minimum(q1, q2))
 
         temp = temperature.apply_fn({"params": temperature.params})

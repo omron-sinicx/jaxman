@@ -13,7 +13,7 @@ import matplotlib.animation as animation
 import matplotlib.pylab as plt
 import numpy as np
 from chex import Array, PRNGKey
-from gym.spaces import Box, Discrete
+from gym.spaces import Box, Dict, Discrete
 from jaxman.planner.dwa import DWAPlanner
 from omegaconf.dictconfig import DictConfig
 
@@ -56,8 +56,20 @@ class JaxMANEnv(gym.Env):
                 shape=(2,),
                 dtype=np.float32,
             )
-        obs_dim = self.obs.cat()[0].shape[0]
-        self.obs_space = Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
+        if not self.is_discrete:
+            comm_dim = 5  # rel_pos, rot, vel, ang
+        elif self.is_diff_drive:
+            comm_dim = 3  # rel_pos, rot
+        else:
+            comm_dim = 2  # rel_pos
+        num_comm_agents = self._env_info.num_comm_agents
+
+        obs_dim = self.obs.cat()[0].shape[0] - comm_dim * num_comm_agents
+        obs_space = Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
+        comm_space = Box(
+            low=-1.0, high=1.0, shape=(num_comm_agents, comm_dim), dtype=np.float32
+        )
+        self.obs_space = Dict({"obs": obs_space, "comm": comm_space})
 
     def _create_planner(self):
         _compute_next_state = _build_compute_next_state(
@@ -72,7 +84,6 @@ class JaxMANEnv(gym.Env):
 
     @property
     def observation_space(self) -> gym.Space:
-        # TODO
         return self.obs_space
 
     @property

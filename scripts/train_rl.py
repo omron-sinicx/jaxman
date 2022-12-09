@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import ray
 from jaxman.env.env import JaxMANEnv
-from jaxman.planner.rl_planner.agent.sac.sac import create_sac_agent
+from jaxman.planner.rl_planner.agent.sac.sac import create_sac_agent, restore_sac_actor
 from jaxman.planner.rl_planner.logger import LogResult
 from jaxman.planner.rl_planner.worker import (
     Evaluator,
@@ -48,18 +48,18 @@ def main(config):
             config.model,
             key,
         )
+        actor = restore_sac_actor(
+            actor, config.env.is_discrete, config.env.is_diff_drive, "../../../model"
+        )
 
-        # action rescaling
-        # action_scale = jnp.array((action_space.high - action_space.low) / 2.0)
-        # action_bias = jnp.array((action_space.high + action_space.low) / 2.0)
         action_scale = None
         action_bias = None
         if config.env.is_discrete:
             target_entropy = (
-                -jnp.log(1.0 / action_space.n) * config.train.target_entropy_ratio
+                -jnp.log(1.0 / env.action_space.n) * config.train.target_entropy_ratio
             )
         else:
-            target_entropy = -action_space.shape[0] / 2
+            target_entropy = -env.action_space.shape[0] / 2
         # target_entropy = -action_space.n/2
         learner = Learner.remote(
             buffer,

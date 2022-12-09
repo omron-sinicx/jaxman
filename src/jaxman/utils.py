@@ -4,7 +4,7 @@ utility functions
 Author: Hikaru Asano
 Affiliation: OMRON SINIC X / University of Tokyo
 """
-from typing import List
+from typing import List, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -35,6 +35,28 @@ def compute_agent_action(action: List):
     return jnp.array(actions)
 
 
-@jax.jit
 def standardize(val):
     return (val - val.mean()) / (val.std() + 1e-10)
+
+
+def split_obs_and_comm(
+    observations: Array, num_comm_agents: int, comm_dim: int
+) -> Tuple[Array, Array]:
+    """split observation into agent basic observations and communications
+
+    Args:
+        observations (Array): observations, contrain basic obs and comm
+        num_comm_agents (int): number of communicating agents
+        comm_dim (int): communication dimensions
+
+    Returns:
+        Tuple[Array, Array]: observations, communications
+    """
+
+    batch_size = observations.shape[0]
+    total_comm_dim = num_comm_agents * comm_dim
+    obs = observations[:, :-total_comm_dim]
+    comm = observations[:, -total_comm_dim:].reshape(
+        batch_size, num_comm_agents, comm_dim
+    )
+    return obs, comm

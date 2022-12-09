@@ -9,9 +9,10 @@ max_ang_vel: 0.25
 min_ang_vel: -0.25
 max_acc: 0.015
 max_ang_acc: 0.125
-fov_r: 3
+fov_r: 5
 num_scans: 64
 scan_range: 0.1
+num_comm_agents: 10
 level: 5
 timeout: 100
 rad: 0.02

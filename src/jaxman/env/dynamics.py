@@ -4,6 +4,7 @@ Author: Hikaru Asano
 Affiliation: OMRON SINIC X / University of Tokyo
 """
 
+from functools import partial
 from typing import Callable, NamedTuple
 
 import jax
@@ -35,6 +36,7 @@ def _build_observe(
     """
 
     _get_obs_pos = _build_get_obs_pos(env_info, agent_info, is_discrete)
+    _get_comm = _build_get_neighbor_communication(env_info)
 
     def _observe(state: AgentState, task_info: TaskInfo) -> AgentObservation:
         """_observe function
@@ -51,17 +53,19 @@ def _build_observe(
         """
 
         if is_discrete:
-            obs_pos = _get_obs_pos(state.pos, task_info.obs.occupancy)
+            obs_pos = _get_obs_pos(state, task_info.obs.occupancy)
             planner_act = None
         else:
             obs_pos = _get_obs_pos(state, task_info.obs.edges)
             planner_act = planner._act(state, task_info)
+        communications = _get_comm(state)
 
         return AgentObservation(
             state=state,
             goals=task_info.goals,
             scans=obs_pos,
             planner_act=planner_act,
+            communications=communications,
         )
 
     return jax.jit(_observe)
@@ -600,6 +604,7 @@ def _build_get_obs_pos(env_info: EnvInfo, agent_info: AgentInfo, is_discrete: bo
 
 
 def _build_get_discrete_obs_pos(env_info: EnvInfo):
+    is_diff_drive = env_info.is_diff_drive
     fov_r = env_info.fov_r
     num_agents = env_info.num_agents
     own_position_map = jnp.zeros((fov_r * 2 + 1, fov_r * 2 + 1)).at[fov_r, fov_r].set(1)
@@ -623,31 +628,38 @@ def _build_get_discrete_obs_pos(env_info: EnvInfo):
         ].set(1.0)
         return Carry(obs_agent_map=obs_agent_map, agent_pos=carry.agent_pos)
 
-    def _extract_fov(pos: Array, obs_agent_map: Array) -> Array:
+    def rot90_traceable(m, k):
+        k = (k + 2) % 4
+        return jax.lax.switch(k, [partial(jnp.rot90, m, k=i) for i in range(4)])
+
+    def _extract_fov(state: AgentState, obs_agent_map: Array) -> Array:
         """
         extract agent fov from obs_agent_map without own position occupancy
 
         Args:
-            pos (Array): agent position
+            state (AgentState): agent state
             obs_agent_map (Array): obstacles and agents map
 
         Returns:
             Array: agent fov
         """
-        x = pos[0] + fov_r
-        y = pos[1] + fov_r
+        x = state.pos[0] + fov_r
+        y = state.pos[1] + fov_r
         fov = jax.lax.dynamic_slice(
             obs_agent_map, (x - fov_r, y - fov_r), (fov_r * 2 + 1, fov_r * 2 + 1)
         )
         fov = fov - own_position_map
+        if is_diff_drive:
+            fov = rot90_traceable(fov, state.rot[0])
+
         return fov
 
-    def _get_obs_and_agent_pos(pos: Array, obs_map: Array) -> Array:
+    def _get_obs_and_agent_pos(state: AgentState, obs_map: Array) -> Array:
         """
-        get flatten neighbor obstacles and agent position
+        get flatten neighboring obstacles and agent position
 
         Args:
-            pos (Array): agent's current position
+            state (AgentState): agent's current state
             obs_map (Array): obstacle map. obs_map is added One padding
 
         Returns:
@@ -658,9 +670,9 @@ def _build_get_discrete_obs_pos(env_info: EnvInfo):
             0,
             num_agents,
             _add_agent_pos_to_obs_map,
-            Carry(obs_agent_map=obs_map, agent_pos=pos),
+            Carry(obs_agent_map=obs_map, agent_pos=state.pos),
         ).obs_agent_map
-        fov = jax.vmap(_extract_fov, in_axes=(0, None))(pos, obs_agent_map)
+        fov = jax.vmap(_extract_fov, in_axes=(0, None))(state, obs_agent_map)
         flatten_fov = fov.reshape(num_agents, -1)
         return flatten_fov
 
@@ -685,7 +697,7 @@ def _build_get_continous_obs_pos(env_info: EnvInfo, agent_info: AgentInfo):
             agent_index (Array): agent index
 
         Returns:
-            Array: lidar scan of neighbor obstacles and agent
+            Array: lidar scan of neighboring obstacles and agent
         """
         rads_wo_self = rads.at[agent_index].set(0)
         top_left = all_state.pos - rads_wo_self
@@ -709,3 +721,94 @@ def _build_get_continous_obs_pos(env_info: EnvInfo, agent_info: AgentInfo):
         return scans
 
     return _get_all_agent_obs_agent_pos
+
+
+def batched_apply_rotation(batched_pos: Array, batched_ang: Array) -> Array:
+    """apply rotation for batch data
+
+    Args:
+        batched_pos (Array): batched agent position
+        batched_ang (Array): bathced agent angle
+
+    Returns:
+        Array: rotated position
+    """
+
+    def apply_rotation(relative_pos: Array, ang: Array) -> Array:
+        """apply rotation matrix
+
+        Args:
+            relative_pos (Array): relative position of other agents
+            ang (Array): agent's own angle
+
+        Returns:
+            Array: rotated relative position
+        """
+        rot_mat = jnp.array(
+            [[jnp.cos(ang), jnp.sin(ang)], [-jnp.sin(ang), jnp.cos(ang)]]
+        )
+        return jnp.dot(relative_pos, rot_mat)
+
+    return jax.vmap(apply_rotation)(batched_pos, batched_ang)
+
+
+def _build_get_neighbor_communication(env_info: EnvInfo):
+    is_discrete = env_info.is_discrete
+    is_diff_drive = env_info.is_diff_drive
+    num_comm_agents = env_info.num_comm_agents
+
+    def _compute_relative_pos(state: AgentState) -> Array:
+        """compute relative position of other agents
+
+        Args:
+            state (AgentState): agent's current state
+
+        Returns:
+            Array: relative position
+        """
+        pos = state.pos
+        relative_pos = pos - pos[:, None, :]
+        if is_diff_drive:
+            ang = state.rot.flatten() * jnp.pi / 2 - jnp.pi
+        else:
+            ang = state.rot.flatten() - jnp.pi
+        if (not is_discrete) or is_diff_drive:
+            return batched_apply_rotation(relative_pos, ang)
+        else:
+            return relative_pos
+
+    def _get_comm(state: AgentState) -> Array:
+        """get communication from neighboring agent
+
+        Args:
+            state (AgentState): agent's current state
+
+        Returns:
+            Array: neighboring agent current informations
+        """
+        relative_pos = _compute_relative_pos(state)
+        dist = jnp.sqrt(jnp.sum(relative_pos**2, axis=-1))
+        dist_order = jnp.argsort(dist, axis=1)
+        dist_order = jax.lax.dynamic_slice_in_dim(
+            dist_order, 1, num_comm_agents, axis=1
+        )
+        neighbor_rel_pos = jax.vmap(lambda rel_pos, index: rel_pos[index])(
+            relative_pos, dist_order
+        )
+
+        if not is_discrete:
+            rot_vel_ang = state.cat()[:, 2:]
+            neighbor_rot_vel_ang = jax.vmap(
+                lambda rot_vel_ang, index: rot_vel_ang[index], in_axes=[None, 0]
+            )(rot_vel_ang, dist_order)
+            return jnp.concatenate((neighbor_rel_pos, neighbor_rot_vel_ang), axis=-1)
+        elif is_diff_drive:
+            rot = state.rot
+            neighbor_rot = jax.vmap(lambda rot, index: rot[index], in_axes=[None, 0])(
+                rot, dist_order
+            )
+            return jnp.concatenate((neighbor_rel_pos, neighbor_rot), axis=-1)
+        else:
+            return neighbor_rel_pos
+
+    return jax.jit(_get_comm)
