@@ -26,8 +26,8 @@ def build_sample_agent_action(actor_fn: Callable, is_discrete: bool, evaluate: b
         Returns:
             Tuple[PRNGKey, Array]: new key, sampled action
         """
-        obs, comm = observations.split_obs_comm()
-        action_dist = actor_fn({"params": params}, obs, comm)
+        obs, comm, mask = observations.split_obs_comm_mask()
+        action_dist = actor_fn({"params": params}, obs, comm, mask)
         if evaluate:
             if is_discrete:
                 actions = jnp.argmax(action_dist.probs, axis=-1)

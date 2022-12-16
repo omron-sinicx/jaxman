@@ -13,7 +13,6 @@ from jaxman.env.core import AgentInfo, AgentState, EnvInfo, TaskInfo, TrialInfo
 from jaxman.env.dynamics import (
     _build_compute_next_state,
     _build_observe,
-    _build_step,
     _get_agent_dist,
     _get_obstacle_dist,
 )
@@ -23,6 +22,8 @@ from jaxman.env.task_generator import sample_valid_start_goal
 from jaxman.planner.dwa import DWAPlanner
 from jaxman.planner.rl_planner.agent.sample_action import build_sample_agent_action
 from jaxman.planner.rl_planner.memory.dataset import Experience
+
+from .dynamics import _build_compute_agent_intention, _build_rollout_step
 
 
 class Carry(NamedTuple):
@@ -43,7 +44,9 @@ class Carry(NamedTuple):
         agent_info: AgentInfo,
         obs: ObstacleMap,
         key: PRNGKey,
+        actor_params: FrozenDict,
         _observe: Callable,
+        _compute_intentions: Callable,
     ):
         episode_steps = 0
         subkey, key = jax.random.split(key)
@@ -68,6 +71,9 @@ class Carry(NamedTuple):
         trial_info = TrialInfo().reset(env_info.num_agents)
         rewards = jnp.zeros((num_agents,))
         dones = jnp.array([False] * num_agents)
+
+        intentions = _compute_intentions(observations, ~dones, actor_params)
+        observations = observations._replace(intentions=intentions)
 
         if env_info.is_discrete:
             actions = jnp.zeros((num_agents,))
@@ -109,8 +115,10 @@ def build_rollout_episode(
     """
     env_info, agent_info, _ = instance.export_info()
 
-    _env_step = _build_step(
-        env_info, agent_info, env_info.is_discrete, env_info.is_diff_drive
+    _step = _build_rollout_step(
+        env_info,
+        agent_info,
+        actor_fn,
     )
     if instance.is_discrete:
         planner = None
@@ -125,6 +133,7 @@ def build_rollout_episode(
             agent_info=agent_info,
         )
     _observe = _build_observe(env_info, agent_info, env_info.is_discrete, planner)
+    _compute_intentions = _build_compute_agent_intention(env_info, agent_info, actor_fn)
     _sample_actions = build_sample_agent_action(
         actor_fn, instance.is_discrete, evaluate
     )
@@ -136,7 +145,15 @@ def build_rollout_episode(
         carry: Carry = None,
     ):
         if not carry:
-            carry = Carry.reset(env_info, agent_info, obs, key, _observe)
+            carry = Carry.reset(
+                env_info,
+                agent_info,
+                obs,
+                key,
+                actor_params,
+                _observe,
+                _compute_intentions,
+            )
 
         def _act_and_step(carry: Carry):
             not_finished_agent = ~carry.dones
@@ -144,11 +161,10 @@ def build_rollout_episode(
             actions = jax.vmap(lambda action, mask: action * mask)(
                 actions, not_finished_agent
             )
-            next_observations, rews, dones, new_trial_info = _env_step(
-                carry.state, actions, carry.task_info, carry.trial_info
+            next_observations, rews, dones, new_trial_info = _step(
+                carry.state, actions, carry.task_info, carry.trial_info, actor_params
             )
             next_state = next_observations.state
-            next_observation = _observe(next_state, carry.task_info)
 
             rewards = carry.rewards + rews
             experience = carry.experience.push(
@@ -160,7 +176,7 @@ def build_rollout_episode(
                 state=next_state,
                 task_info=carry.task_info,
                 trial_info=new_trial_info,
-                observations=next_observation,
+                observations=next_observations,
                 key=key,
                 experience=experience,
                 rewards=rewards,

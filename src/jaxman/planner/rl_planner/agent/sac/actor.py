@@ -39,18 +39,21 @@ def create_actor(
     Returns:
         TrainState: actor TrainState
     """
-    obs_dim = observation_space["obs"].shape[0]
+    obs_dim = observation_space["obs"].shape
     comm_dim = observation_space["comm"].shape
+    mask_dim = observation_space["mask"].shape
     if isinstance(action_space, Box):
         action_dim = action_space.shape[0]
         actor_fn = ContinuousActor(config.hidden_dim, config.msg_dim, action_dim)
     else:
         action_dim = action_space.n
         actor_fn = DiscreteActor(config.hidden_dim, config.msg_dim, action_dim)
-
-    params = actor_fn.init(key, jnp.ones([1, obs_dim]), jnp.ones([1, *comm_dim]))[
-        "params"
-    ]
+    params = actor_fn.init(
+        key,
+        jnp.ones([1, *obs_dim]),
+        jnp.ones([1, *comm_dim]),
+        jnp.ones([1, *mask_dim]),
+    )["params"]
 
     lr_rate_schedule = optax.cosine_decay_schedule(
         config.actor_lr, config.decay_steps, config.decay_alpha
@@ -91,6 +94,7 @@ def update(
             {"params": actor_params},
             batch.observations,
             batch.communications,
+            batch.neighbor_masks,
         )
 
         action_probs = dist.probs
@@ -100,7 +104,10 @@ def update(
         entropy = -jnp.sum(action_probs * log_probs, axis=-1)
 
         q1, q2 = critic.apply_fn(
-            {"params": critic.params}, batch.observations, batch.communications
+            {"params": critic.params},
+            batch.observations,
+            batch.communications,
+            batch.neighbor_masks,
         )
         q = jnp.minimum(q1, q2)
         temp = temperature.apply_fn({"params": temperature.params})
@@ -115,12 +122,17 @@ def update(
             {"params": actor_params},
             batch.observations,
             batch.communications,
+            batch.neighbor_masks,
         )
         actions = dist.sample(seed=key)
         log_probs = dist.log_prob(actions)
 
         q1, q2 = critic.apply_fn(
-            {"params": critic.params}, batch.observations, batch.communications, actions
+            {"params": critic.params},
+            batch.observations,
+            batch.communications,
+            batch.neighbor_masks,
+            actions,
         )
         q = jnp.squeeze(jnp.minimum(q1, q2))
 

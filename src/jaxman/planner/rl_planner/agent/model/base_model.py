@@ -11,7 +11,9 @@ from flax import linen as fnn
 
 
 @jax.jit
-def msg_attention(query: Array, key: Array, value: Array) -> Array:
+def msg_attention(
+    query: Array, key: Array, value: Array, neighbor_mask: Array
+) -> Array:
     """
     compute attention
 
@@ -19,13 +21,15 @@ def msg_attention(query: Array, key: Array, value: Array) -> Array:
         query (Array): query. shape: (batch_size, msg_dim)
         key (Array): key. shape: (batch_size, num_comm_agents, msg_dim)
         value (Array): value. shape: (batch_size, num_comm_agents, msg_dim)
+        neighbor_mask (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
 
     Returns:
         Array: attentioned message
     """
     weight = jax.vmap(jnp.matmul)(key, query) / key.shape[-1]
-    weight = fnn.softmax(weight)
-    weighted_value = jax.vmap(jnp.dot)(weight, value)
+    masked_weight = weight * neighbor_mask
+    masked_weight = fnn.softmax(masked_weight)
+    weighted_value = jax.vmap(jnp.dot)(masked_weight, value)
     return weighted_value
 
 
@@ -38,6 +42,7 @@ class ObsActEncoder(fnn.Module):
         self,
         observations: Array,
         communications: Array,
+        neighbor_masks: Array,
         actions: Array,
     ) -> Array:
         """
@@ -45,7 +50,8 @@ class ObsActEncoder(fnn.Module):
 
         Args:
             observations (Array): observations. shape: (batch_size, obs_dim)
-            communications (Array): communications with neighbor agents. shape: (batch_size, num_comm_agents, comm_dim)
+            communications (Array): communications with neighbor agents. shape: (batch_size, num_agents, comm_dim)
+            neighbor_masks (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
             actions (Array): agent actions. shape: (batch_size, action_dim)
 
         Returns:
@@ -69,7 +75,7 @@ class ObsActEncoder(fnn.Module):
         assert_shape(key, (batch_size, num_comm_agents, self.msg_dim))
 
         # attention
-        h_comm = msg_attention(query, key, value)
+        h_comm = msg_attention(query, key, value, neighbor_masks)
         assert_shape(h_comm, (batch_size, self.msg_dim))
 
         h_obs_comm = jnp.concatenate((h_obs, h_comm), -1)
@@ -88,6 +94,7 @@ class ObsEncoder(fnn.Module):
         self,
         observations: Array,
         communications: Array,
+        neighbor_masks: Array,
     ) -> Array:
         """
         encode observation, communication
@@ -95,6 +102,7 @@ class ObsEncoder(fnn.Module):
         Args:
             observations (Array): observations. shape: (batch_size, obs_dim)
             communications (Array): communications with neighbor agents. shape: (batch_size, num_comm_agents, comm_dim)
+            neighbor_masks (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
 
         Returns:
             Array: compute hidden state
@@ -115,7 +123,7 @@ class ObsEncoder(fnn.Module):
         assert_shape(key, (batch_size, num_comm_agents, self.msg_dim))
 
         # attention
-        h_comm = msg_attention(query, key, value)
+        h_comm = msg_attention(query, key, value, neighbor_masks)
         assert_shape(h_comm, (batch_size, self.msg_dim))
 
         h_obs_comm = jnp.concatenate((h_obs, h_comm), -1)

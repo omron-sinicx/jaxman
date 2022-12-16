@@ -1,24 +1,41 @@
+import hydra
 import jax.numpy as jnp
-import pytest
 from jaxman.env.env import JaxMANEnv
+from omegaconf import OmegaConf
 
 
-@pytest.fixture
-def setup():
-    import hydra
-    from omegaconf import OmegaConf
+def test_grid_env():
+    config = hydra.utils.instantiate(OmegaConf.load("scripts/config/env/grid.yaml"))
 
-    env_config = hydra.utils.instantiate(
-        OmegaConf.load("scripts/config/env/random.yaml")
+    env = JaxMANEnv(config)
+    obs = env.reset()
+    done = False
+    actions = env.sample_actions()
+    while not done:
+        obs, rew, done, info = env.step(actions)
+        actions = env.sample_actions()
+        done = jnp.all(done)
+
+
+def test_diff_drive_env():
+    config = hydra.utils.instantiate(
+        OmegaConf.load("scripts/config/env/diff_drive.yaml")
     )
 
-    return env_config
+    env = JaxMANEnv(config)
+    obs = env.reset()
+    done = False
+    actions = env.sample_actions()
+    while not done:
+        obs, rew, done, info = env.step(actions)
+        actions = env.sample_actions()
+        done = jnp.all(done)
 
 
-def test_grid_env(setup):
-    config = setup
-    config.is_discrete = True
-    config.is_diff_drive = False
+def test_continuous_env():
+    config = hydra.utils.instantiate(
+        OmegaConf.load("scripts/config/env/continuous.yaml")
+    )
 
     env = JaxMANEnv(config)
     obs = env.reset()
@@ -30,42 +47,10 @@ def test_grid_env(setup):
         done = jnp.all(done)
 
 
-def test_diff_drive_env(setup):
-    config = setup
-    config.is_discrete = True
-    config.is_diff_drive = True
-
-    env = JaxMANEnv(config)
-    obs = env.reset()
-    done = False
-    actions = env.sample_actions()
-    while not done:
-        obs, rew, done, info = env.step(actions)
-        actions = env.sample_actions()
-        done = jnp.all(done)
-
-
-def test_continuous_env(setup):
-    config = setup
-    config.is_discrete = False
-    config.is_diff_drive = False
-    config.map_size = 128
-
-    env = JaxMANEnv(config)
-    obs = env.reset()
-    done = False
-    actions = env.sample_actions()
-    while not done:
-        obs, rew, done, info = env.step(actions)
-        actions = env.sample_actions()
-        done = jnp.all(done)
-
-
-def test_planner(setup):
-    config = setup
-    config.is_discrete = False
-    config.is_diff_drive = False
-    config.map_size = 128
+def test_planner():
+    config = hydra.utils.instantiate(
+        OmegaConf.load("scripts/config/env/continuous.yaml")
+    )
 
     env = JaxMANEnv(config)
     obs = env.reset()

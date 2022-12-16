@@ -38,10 +38,11 @@ class Buffer:
             self.act_dim = action_space.shape
 
         self.obs_dim = observation_space["obs"].shape[0]
-        self.num_comm_agents = observation_space["comm"].shape[0]
+        self.num_agents = observation_space["comm"].shape[0]
         self.comm_dim = observation_space["comm"].shape[1]
+        self.mask_dim = observation_space["mask"].shape[0]
 
-        total_obs_dim = self.obs_dim + self.num_comm_agents * self.comm_dim
+        total_obs_dim = self.obs_dim + self.num_agents * self.comm_dim + self.mask_dim
         # buffer
         self.capacity = int(capacity)
         self.observations = np.zeros(
@@ -60,11 +61,13 @@ class Buffer:
 class TrainBatch(NamedTuple):
     observations: Array
     communications: Array
+    neighbor_masks: Array
     actions: Array
     rewards: Array
     masks: Array
     next_observations: Array
     next_communications: Array
+    next_neighbor_masks: Array
 
 
 class Experience(NamedTuple):

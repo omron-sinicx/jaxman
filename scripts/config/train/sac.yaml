@@ -9,3 +9,5 @@ save_interval: 100000
 # buffer
 capacity: 1500000
 warmup_iters: 10000
+# evaluate
+eval_iters: 1000
