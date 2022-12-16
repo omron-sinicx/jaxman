@@ -40,13 +40,13 @@ def standardize(val):
 
 
 def split_obs_and_comm(
-    observations: Array, num_comm_agents: int, comm_dim: int
+    observations: Array, num_agents: int, comm_dim: int
 ) -> Tuple[Array, Array]:
     """split observation into agent basic observations and communications
 
     Args:
         observations (Array): observations, contrain basic obs and comm
-        num_comm_agents (int): number of communicating agents
+        num_agents (int): number of agent in whole environment
         comm_dim (int): communication dimensions
 
     Returns:
@@ -54,9 +54,11 @@ def split_obs_and_comm(
     """
 
     batch_size = observations.shape[0]
-    total_comm_dim = num_comm_agents * comm_dim
-    obs = observations[:, :-total_comm_dim]
-    comm = observations[:, -total_comm_dim:].reshape(
-        batch_size, num_comm_agents, comm_dim
+    total_comm_dim = num_agents * comm_dim
+    mask_dim = num_agents
+    obs = observations[:, : -total_comm_dim - mask_dim]
+    comm = observations[:, -total_comm_dim - mask_dim : -mask_dim].reshape(
+        batch_size, num_agents, comm_dim
     )
-    return obs, comm
+    mask = observations[:, -mask_dim:]
+    return obs, comm, mask

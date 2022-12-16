@@ -5,10 +5,13 @@ Affiliation: OMRON SINIC X / University of Tokyo
 """
 
 
+import csv
 import threading
 import time
 from typing import Tuple
 
+import bootstrapped.bootstrap as bs
+import bootstrapped.stats_functions as bs_stats
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -51,6 +54,7 @@ class Evaluator:
         self.counter = 0
         self.last_counter = 0
         self.animation = None
+        self.done = False
 
         self._rollout_fn = build_rollout_episode(
             instance, actor.apply_fn, evaluate=False
@@ -154,3 +158,84 @@ class Evaluator:
             trial_info,
             animation,
         )
+
+    def evaluate(self, eval_iters: int):
+        """evaluate trained actor
+
+        Args:
+            eval_iters (int): number of evaluation episode
+        """
+        actor_params, _ = self._update_parameters()
+        reward = []
+        success = []
+        makespan = []
+        sum_of_cost = []
+
+        for i in range(eval_iters):
+            key = jax.random.PRNGKey(i)
+            carry = self._rollout_fn(key, actor_params, self.instance.obs)
+            reward.append(carry.rewards.mean())
+            trial_info = carry.trial_info
+            success.append(trial_info.is_success)
+            if trial_info.is_success:
+                makespan.append(trial_info.makespan)
+                sum_of_cost.append(trial_info.sum_of_cost)
+
+        reward_mean = bs.bootstrap(np.array(reward), stat_func=bs_stats.mean)
+        reward_std = bs.bootstrap(np.array(reward), stat_func=bs_stats.std)
+        success_mean = bs.bootstrap(np.array(success), stat_func=bs_stats.std)
+        success_std = bs.bootstrap(np.array(success), stat_func=bs_stats.std)
+        makespan_mean = bs.bootstrap(np.array(makespan), stat_func=bs_stats.mean)
+        makespan_std = bs.bootstrap(np.array(makespan), stat_func=bs_stats.std)
+        sum_of_cost_mean = bs.bootstrap(np.array(sum_of_cost), stat_func=bs_stats.mean)
+        sum_of_cost_std = bs.bootstrap(np.array(sum_of_cost), stat_func=bs_stats.std)
+
+        f = open("eval.cvs", "w")
+        csv_writer = csv.writer(f)
+        csv_writer.writerow(["", "mean", "mean_lower", "mean_upper", "std"])
+        csv_writer.writerow(
+            [
+                "reward",
+                reward_mean.value,
+                reward_mean.lower_bound,
+                reward_mean.upper_bound,
+                reward_std.value,
+            ]
+        )
+        csv_writer.writerow(
+            [
+                "success",
+                success_mean.value,
+                success_mean.lower_bound,
+                success_mean.upper_bound,
+                success_std.value,
+            ]
+        )
+        csv_writer.writerow(
+            [
+                "makespan",
+                makespan_mean.value,
+                makespan_mean.lower_bound,
+                makespan_mean.upper_bound,
+                makespan_std.value,
+            ]
+        )
+        csv_writer.writerow(
+            [
+                "sum_of_cost",
+                sum_of_cost_mean.value,
+                sum_of_cost_mean.lower_bound,
+                sum_of_cost_mean.upper_bound,
+                sum_of_cost_std.value,
+            ]
+        )
+        f.close()
+        self.done = True
+
+    def is_eval_done(self) -> bool:
+        """returns whether the evaluation has been completed or not.
+
+        Returns:
+            bool: evluation has been completed or not
+        """
+        return self.done

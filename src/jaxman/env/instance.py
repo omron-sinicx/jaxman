@@ -28,6 +28,7 @@ class Instance:
     goal_rads: Array
     obs: ObstacleMap
     fov_r: int
+    comm_r: float
     num_scans: int
     scan_range: float
     timeout: int
@@ -58,11 +59,10 @@ class Instance:
         self.rads = jnp.array([[config.rad] for _ in range(self.num_agents)])
         self.goal_rads = jnp.array([[config.goal_rad] for _ in range(self.num_agents)])
         self.fov_r = config.fov_r
+        self.comm_r = config.comm_r
         self.num_scans = config.num_scans
         self.scan_range = config.scan_range
-        self.num_comm_agents = jnp.minimum(
-            config.num_comm_agents, config.num_agents - 1
-        ).astype(int)
+        self.use_intentions = config.use_intentions
         self.timeout = config.timeout
         self.goal_reward = config.goal_reward
         self.crash_penalty = config.crash_penalty
@@ -110,9 +110,10 @@ class Instance:
             sdf_map=self.obs.sdf,
             edges=self.obs.edges,
             fov_r=int(self.fov_r),
+            comm_r=self.comm_r,
             num_scans=int(self.num_scans),
             scan_range=float(self.scan_range),
-            num_comm_agents=int(self.num_comm_agents),
+            use_intentions=bool(self.use_intentions),
             timeout=int(self.timeout),
             goal_reward=self.goal_reward,
             crash_penalty=self.crash_penalty,

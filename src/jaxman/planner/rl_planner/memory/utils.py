@@ -38,19 +38,29 @@ def _push_experience_to_buffer(buffer: Buffer, experience: Experience):
         buffer.insert_index = idx
 
 
-def _sample_experience(
-    buffer: Buffer, batch_size: int, num_comm_agents: int, comm_dim: int
-):
+def _sample_experience(buffer: Buffer, batch_size: int, num_agents: int, comm_dim: int):
     index = np.random.randint(buffer.size, size=batch_size)
 
     all_obs = buffer.observations[index]
-    obss, comms = split_obs_and_comm(all_obs, num_comm_agents, comm_dim)
+    obss, comms, neighbor_masks = split_obs_and_comm(all_obs, num_agents, comm_dim)
     acts = buffer.actions[index]
     rews = buffer.rewards[index]
     masks = buffer.masks[index]
     next_all_obs = buffer.next_observations[index]
-    next_obss, next_comms = split_obs_and_comm(next_all_obs, num_comm_agents, comm_dim)
+    next_obss, next_comms, next_neighbor_masks = split_obs_and_comm(
+        next_all_obs, num_agents, comm_dim
+    )
 
-    data = TrainBatch(obss, comms, acts, rews, masks, next_obss, next_comms)
+    data = TrainBatch(
+        obss,
+        comms,
+        neighbor_masks,
+        acts,
+        rews,
+        masks,
+        next_obss,
+        next_comms,
+        next_neighbor_masks,
+    )
 
     return data

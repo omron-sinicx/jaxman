@@ -57,19 +57,23 @@ class JaxMANEnv(gym.Env):
                 dtype=np.float32,
             )
         if not self.is_discrete:
-            comm_dim = 5  # rel_pos, rot, vel, ang
+            comm_dim = 10  # (rel_pos, rot, vel, ang) * 2
         elif self.is_diff_drive:
-            comm_dim = 3  # rel_pos, rot
+            comm_dim = 6  # (rel_pos, rot) * 2
         else:
-            comm_dim = 2  # rel_pos
-        num_comm_agents = self._env_info.num_comm_agents
+            comm_dim = 4  # (rel_pos,) * 2
 
-        obs_dim = self.obs.cat()[0].shape[0] - comm_dim * num_comm_agents
+        obs_dim = (
+            self.obs.cat()[0].shape[0] - comm_dim * self.num_agents - self.num_agents
+        )
         obs_space = Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
         comm_space = Box(
-            low=-1.0, high=1.0, shape=(num_comm_agents, comm_dim), dtype=np.float32
+            low=-1.0, high=1.0, shape=(self.num_agents, comm_dim), dtype=np.float32
         )
-        self.obs_space = Dict({"obs": obs_space, "comm": comm_space})
+        mask_space = Box(low=0.0, high=1.0, shape=(self.num_agents,))
+        self.obs_space = Dict(
+            {"obs": obs_space, "comm": comm_space, "mask": mask_space}
+        )
 
     def _create_planner(self):
         _compute_next_state = _build_compute_next_state(
@@ -164,8 +168,8 @@ class JaxMANEnv(gym.Env):
 
     def step(self, actions: dict) -> tuple[dict, dict, dict, dict, dict]:
         """
-        Receives a dictionary of actions keyed by the agent name.
-        Returns the observation dictionary, reward dictionary, terminated dictionary, truncated dictionary and info dictionary, where each dictionary is keyed by the agent.
+        Receives all agent actions as an array
+        Returns the observation, reward, terminated, truncated and info
         """
         obs, rew, done, info = self._step(
             self.state, actions, self.task_info, self.trial_info

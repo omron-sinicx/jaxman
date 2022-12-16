@@ -139,5 +139,5 @@ class LogResult:
         if animation is not None:
             self.writer.add_video("video", animation, self.total_episodes)
 
-    def close(self):
-        self.f.close()
+    # def close(self):
+    #     self.f.close()

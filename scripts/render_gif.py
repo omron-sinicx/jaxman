@@ -1,5 +1,9 @@
+"""rendering agent trajectory gif
+
+Author: Hikaru Asano
+Affiliation: OMRON SINIC X / University of Tokyo
+"""
 import logging
-import time
 
 import hydra
 import jax
@@ -7,9 +11,7 @@ import jax.numpy as jnp
 import ray
 from flax.training import checkpoints
 from jaxman.env.env import JaxMANEnv
-from jaxman.env.viz import render_gif
 from jaxman.planner.rl_planner.agent.sac.sac import create_sac_agent
-from jaxman.planner.rl_planner.logger import LogResult
 from jaxman.planner.rl_planner.rollout.rollout import build_rollout_episode
 
 

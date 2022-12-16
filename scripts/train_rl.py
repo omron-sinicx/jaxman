@@ -49,7 +49,7 @@ def main(config):
             key,
         )
         actor = restore_sac_actor(
-            actor, config.env.is_discrete, config.env.is_diff_drive, "../../../model"
+            actor, config.env.is_discrete, config.env.is_diff_drive, "../../../../model"
         )
 
         action_scale = None
@@ -117,18 +117,17 @@ def main(config):
                 animation,
             )
             print()
-        evaluator.evaluate.remote()
+        evaluator.evaluate.remote(config.train.eval_iters)
         done = False
 
         while not done:
             done = ray.get(evaluator.is_eval_done.remote())
             time.sleep(0.5)
 
-        ray.kill(actor)
+        ray.kill(rollout_worker)
         ray.kill(evaluator)
         ray.kill(learner)
         ray.kill(buffer)
-        logger.close()
         writer.close()
 
 

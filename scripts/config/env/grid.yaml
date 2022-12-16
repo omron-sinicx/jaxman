@@ -1,4 +1,4 @@
-name: 'random'
+name: 'grid'
 is_discrete: True
 is_diff_drive: False
 num_agents: 2
@@ -10,9 +10,10 @@ min_ang_vel: -0.25
 max_acc: 0.015
 max_ang_acc: 0.125
 fov_r: 5
+comm_r: 5
 num_scans: 64
 scan_range: 0.1
-num_comm_agents: 10
+use_intentions: True
 level: 5
 timeout: 100
 rad: 0.02

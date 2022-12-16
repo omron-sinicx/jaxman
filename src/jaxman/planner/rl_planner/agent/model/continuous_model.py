@@ -30,6 +30,7 @@ class Critic(fnn.Module):
         self,
         observations: Array,
         communications: Array,
+        neighbor_masks: Array,
         actions: Array,
     ) -> Array:
         """
@@ -38,6 +39,7 @@ class Critic(fnn.Module):
         Args:
             observations (Array): observations. shape: (batch_size, obs_dim)
             communications (Array): communications with neighbor agents. shape: (batch_size, num_comm_agents, comm_dim)
+            neighbor_masks (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
             actions (Array): agent actions. shape: (batch_size, action_dim)
 
         Returns:
@@ -45,7 +47,7 @@ class Critic(fnn.Module):
         """
         # encode observation, communications and action
         encoder = ObsActEncoder(self.hidden_dim, self.msg_dim)
-        h = encoder(observations, communications, actions)
+        h = encoder(observations, communications, neighbor_masks, actions)
 
         h = fnn.Dense(self.hidden_dim)(h)
         h = fnn.relu(h)
@@ -60,13 +62,18 @@ class DoubleCritic(fnn.Module):
 
     @fnn.compact
     def __call__(
-        self, observations: Array, communications: Array, actions: Array
+        self,
+        observations: Array,
+        communications: Array,
+        neighbor_masks: Array,
+        actions: Array,
     ) -> Array:
         """calculate double q
 
         Args:
             observations (Array): agent observation
             communications (Array): communications with neighbor agents.
+            neighbor_masks (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
             actions (Array): agent action
 
         Returns:
@@ -81,7 +88,7 @@ class DoubleCritic(fnn.Module):
             axis_size=2,
         )
         qs = VmapCritic(self.hidden_dim, self.msg_dim)(
-            observations, communications, actions
+            observations, communications, neighbor_masks, actions
         )
         q1 = qs[0]
         q2 = qs[1]
@@ -100,6 +107,7 @@ class Actor(fnn.Module):
         self,
         observations: Array,
         communications: Array,
+        neighbor_masks: Array,
     ) -> Array:
         """
         calculate agent action distribution
@@ -107,13 +115,14 @@ class Actor(fnn.Module):
         Args:
             observations (Array): observations. shape: (batch_size, obs_dim)
             communications (Array): communications with neighbor agents. shape: (batch_size, num_comm_agents, comm_dim)
+            neighbor_masks (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
 
         Returns:
             Array: action distribution
         """
         # encode observation, communications and action
         encoder = ObsEncoder(self.hidden_dim, self.msg_dim)
-        h = encoder(observations, communications)
+        h = encoder(observations, communications, neighbor_masks)
 
         # mean
         means = fnn.Dense(self.hidden_dim)(h)

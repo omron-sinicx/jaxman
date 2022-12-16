@@ -39,23 +39,28 @@ def create_critic(
     Returns:
         TrainState: actor TrainState
     """
-    obs_dim = observation_space["obs"].shape[0]
+    obs_dim = observation_space["obs"].shape
     comm_dim = observation_space["comm"].shape
+    mask_dim = observation_space["mask"].shape
     if isinstance(action_space, Box):
         action_dim = action_space.shape[0]
         critic_fn = ContinuousCritic(config.hidden_dim, config.msg_dim)
         params = critic_fn.init(
             key,
-            jnp.ones([1, obs_dim]),
+            jnp.ones([1, *obs_dim]),
             jnp.ones([1, *comm_dim]),
+            jnp.ones([1, *mask_dim]),
             jnp.ones([1, action_dim]),
         )["params"]
     else:
         action_dim = action_space.n
         critic_fn = DiscreteCritic(config.hidden_dim, config.msg_dim, action_dim)
-        params = critic_fn.init(key, jnp.ones([1, obs_dim]), jnp.ones([1, *comm_dim]))[
-            "params"
-        ]
+        params = critic_fn.init(
+            key,
+            jnp.ones([1, *obs_dim]),
+            jnp.ones([1, *comm_dim]),
+            jnp.ones([1, *mask_dim]),
+        )["params"]
 
     lr_rate_schedule = optax.cosine_decay_schedule(
         config.actor_lr, config.decay_steps, config.decay_alpha
@@ -121,6 +126,7 @@ def update(
             {"params": actor.params},
             batch.next_observations,
             batch.next_communications,
+            batch.next_neighbor_masks,
         )
 
         next_action_probs = next_dist.probs
@@ -132,6 +138,7 @@ def update(
             {"params": target_critic.params},
             batch.next_observations,
             batch.next_communications,
+            batch.next_neighbor_masks,
         )
         next_q = jnp.minimum(next_q1, next_q2)
         temp = temperature.apply_fn({"params": temperature.params})
@@ -147,6 +154,7 @@ def update(
             {"params": params},
             batch.observations,
             batch.communications,
+            batch.neighbor_masks,
         )
         q1 = jax.vmap(lambda q_values, i: q_values[i])(q1, batch.actions)
         q2 = jax.vmap(lambda q_values, i: q_values[i])(q2, batch.actions)
@@ -165,6 +173,7 @@ def update(
             {"params": actor.params},
             batch.next_observations,
             batch.next_communications,
+            batch.next_neighbor_masks,
         )
         next_actions = dist.sample(seed=key)
         next_log_probs = dist.log_prob(next_actions)
@@ -173,6 +182,7 @@ def update(
             {"params": target_critic.params},
             batch.next_observations,
             batch.next_communications,
+            batch.next_neighbor_masks,
             next_actions,
         )
         next_q = jnp.squeeze(jnp.minimum(next_q1, next_q2))
@@ -183,7 +193,11 @@ def update(
         )
 
         q1, q2 = critic.apply_fn(
-            {"params": params}, batch.observations, batch.communications, batch.actions
+            {"params": params},
+            batch.observations,
+            batch.communications,
+            batch.neighbor_masks,
+            batch.actions,
         )
         td_error = (jnp.squeeze(q1) - target_q) ** 2 + (jnp.squeeze(q2) - target_q) ** 2
         assert_shape(td_error, (batch_size,))

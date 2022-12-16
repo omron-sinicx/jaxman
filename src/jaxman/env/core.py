@@ -24,9 +24,10 @@ class EnvInfo(NamedTuple):
     sdf_map: Optional[Array]
     edges: Optional[Array]
     fov_r: int
+    comm_r: float
     num_scans: int
     scan_range: float
-    num_comm_agents: int
+    use_intentions: bool
     timeout: int
     goal_reward: float
     crash_penalty: float
@@ -217,7 +218,24 @@ class AgentObservation(NamedTuple):
     goals: Optional[Array] = None
     scans: Optional[Array] = None
     planner_act: Optional[Array] = None
-    communications: Optional[Array] = None
+    relative_positions: Optional[Array] = None
+    intentions: Optional[Array] = None
+    masks: Optional[Array] = None
+
+    def normalize(self, map_size: int) -> AgentObservation:
+        """normalized agent position and goal position used for discrete environment
+
+        Args:
+            map_size (int): map size
+
+        Returns:
+            AgentObservation: normalized AgentObservations
+        """
+        normed_pos = self.state.pos / map_size
+        normed_state = self.state._replace(pos=normed_pos)
+        normed_goals = self.goals / map_size
+
+        return self._replace(state=normed_state, goals=normed_goals)
 
     def cat(self, as_numpy=False) -> Array:
         """
@@ -239,16 +257,23 @@ class AgentObservation(NamedTuple):
         )
         if self.planner_act is not None:
             ret = jnp.hstack((ret, self.planner_act))
-        if self.communications is not None:
+        if self.relative_positions is not None:
+            comm = jnp.concatenate((self.relative_positions, self.intentions), axis=-1)
             num_agents = ret.shape[0]
-            comm = self.communications.reshape([num_agents, -1])
-            ret = jnp.hstack((ret, comm))
+            ret = jnp.hstack((ret, comm.reshape([num_agents, -1])))
+        if self.masks is not None:
+            ret = jnp.hstack((ret, self.masks))
 
         if as_numpy:
             ret = np.array(ret)
         return ret
 
-    def split_obs_comm(self) -> Tuple[Array, Array]:
+    def split_obs_comm_mask(self) -> Tuple[Array, Array, Array]:
+        """split agent observation into base_observation, communication and communication_mask
+
+        Returns:
+            Tuple[Array, Array, Array]: base_observation, communication, communication_mask
+        """
         ret_state = self.state.cat()
         ret = jnp.hstack(
             (
@@ -261,9 +286,10 @@ class AgentObservation(NamedTuple):
             obs = jnp.hstack((ret, self.planner_act))
         else:
             obs = ret
-        comm = self.communications
+        comm = jnp.concatenate((self.relative_positions, self.intentions), axis=-1)
+        mask = self.masks
 
-        return obs, comm
+        return obs, comm, mask
 
     def is_valid(self) -> None:
         # (n_agents, 2)

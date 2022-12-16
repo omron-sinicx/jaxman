@@ -48,7 +48,8 @@ dev = [
     "hydra-core",
     "opencv-python",
     "ray",
-    "moviepy"
+    "moviepy",
+    "bootstrapped",
 ]
 
 [tool.pysen]

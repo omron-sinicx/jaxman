@@ -36,7 +36,8 @@ def _build_observe(
     """
 
     _get_obs_pos = _build_get_obs_pos(env_info, agent_info, is_discrete)
-    _get_comm = _build_get_neighbor_communication(env_info)
+    _get_relative_positions = _build_get_relative_positions(env_info)
+    _get_mask = _build_compute_neighbor_agent_mask(env_info)
 
     def _observe(state: AgentState, task_info: TaskInfo) -> AgentObservation:
         """_observe function
@@ -58,14 +59,18 @@ def _build_observe(
         else:
             obs_pos = _get_obs_pos(state, task_info.obs.edges)
             planner_act = planner._act(state, task_info)
-        communications = _get_comm(state)
+        relative_positions = _get_relative_positions(state, state)
+        intentions = jnp.zeros_like(relative_positions)
+        masks = _get_mask(relative_positions[:, :, :2])
 
         return AgentObservation(
             state=state,
             goals=task_info.goals,
             scans=obs_pos,
             planner_act=planner_act,
-            communications=communications,
+            relative_positions=relative_positions,
+            intentions=intentions,
+            masks=masks,
         )
 
     return jax.jit(_observe)
@@ -752,63 +757,125 @@ def batched_apply_rotation(batched_pos: Array, batched_ang: Array) -> Array:
     return jax.vmap(apply_rotation)(batched_pos, batched_ang)
 
 
-def _build_get_neighbor_communication(env_info: EnvInfo):
+def _build_get_relative_positions(env_info: EnvInfo):
     is_discrete = env_info.is_discrete
     is_diff_drive = env_info.is_diff_drive
-    num_comm_agents = env_info.num_comm_agents
 
-    def _compute_relative_pos(state: AgentState) -> Array:
-        """compute relative position of other agents
+    def _compute_relative_pos(
+        base_state: AgentState, target_state: AgentState
+    ) -> Array:
+        """compute relative position of all agents
 
         Args:
-            state (AgentState): agent's current state
+            base_state (AgentState): origin state for calculate relative position
+            target_state (AgentState): target state for calulate relative position
 
         Returns:
             Array: relative position
         """
-        pos = state.pos
-        relative_pos = pos - pos[:, None, :]
+
+        relative_pos = jax.vmap(lambda target, base: target - base, in_axes=(None, 0))(
+            target_state.pos, base_state.pos
+        )
         if is_diff_drive:
-            ang = state.rot.flatten() * jnp.pi / 2 - jnp.pi
+            ang = base_state.rot.flatten() * jnp.pi / 2 - jnp.pi
         else:
-            ang = state.rot.flatten() - jnp.pi
+            ang = base_state.rot.flatten() - jnp.pi
         if (not is_discrete) or is_diff_drive:
             return batched_apply_rotation(relative_pos, ang)
         else:
             return relative_pos
 
-    def _get_comm(state: AgentState) -> Array:
-        """get communication from neighboring agent
+    def _compute_relative_rot(
+        base_state: AgentState, target_state: AgentState
+    ) -> Array:
+        """compute relative rotation (angle of agent) of all agents
+
+        Args:
+            base_state (AgentState): origin state for calculate relative rotation
+            target_state (AgentState): target state for calulate relative rotation
+
+        Returns:
+            Array: relative rotation
+        """
+        relative_rot = jax.vmap(lambda target, base: target - base, in_axes=(None, 0))(
+            target_state.rot, base_state.rot
+        )
+
+        if not is_discrete:
+            return (relative_rot + jnp.pi) % (2 * jnp.pi)
+        else:
+            return (relative_rot + 2) % 4
+
+    def _compute_relative_vel(
+        base_state: AgentState, target_state: AgentState
+    ) -> Array:
+        """compute ralative velocity of all agents
+
+        Args:
+            base_state (AgentState): origin state for calculate relative velocity
+            target_state (AgentState): target state for calulate relative velocity
+
+        Returns:
+            Array: relative velocity
+        """
+        base_rot = (base_state.rot + base_state.ang) % (2 * jnp.pi)
+        target_rot = (target_state.rot + target_state.ang) % (2 * jnp.pi)
+
+        base_vel = base_state.vel * jnp.hstack([jnp.sin(base_rot), jnp.cos(base_rot)])
+        target_vel = target_state.vel * jnp.hstack(
+            [jnp.sin(target_rot), jnp.cos(target_rot)]
+        )
+
+        relative_vel = jax.vmap(lambda target, base: target - base, in_axes=(None, 0))(
+            target_vel, base_vel
+        )
+        return relative_vel
+
+    def _get_relative_position(
+        base_state: AgentState, target_state: AgentState
+    ) -> Array:
+        """get all agent's current information
 
         Args:
             state (AgentState): agent's current state
 
         Returns:
-            Array: neighboring agent current informations
+            Array: all agent current informations
         """
-        relative_pos = _compute_relative_pos(state)
-        dist = jnp.sqrt(jnp.sum(relative_pos**2, axis=-1))
-        dist_order = jnp.argsort(dist, axis=1)
-        dist_order = jax.lax.dynamic_slice_in_dim(
-            dist_order, 1, num_comm_agents, axis=1
-        )
-        neighbor_rel_pos = jax.vmap(lambda rel_pos, index: rel_pos[index])(
-            relative_pos, dist_order
-        )
+        relative_pos = _compute_relative_pos(base_state, target_state)
 
         if not is_discrete:
-            rot_vel_ang = state.cat()[:, 2:]
-            neighbor_rot_vel_ang = jax.vmap(
-                lambda rot_vel_ang, index: rot_vel_ang[index], in_axes=[None, 0]
-            )(rot_vel_ang, dist_order)
-            return jnp.concatenate((neighbor_rel_pos, neighbor_rot_vel_ang), axis=-1)
+            relative_rot = _compute_relative_rot(base_state, target_state)
+            relative_vel = _compute_relative_vel(base_state, target_state)
+            return jnp.concatenate([relative_pos, relative_rot, relative_vel], axis=-1)
         elif is_diff_drive:
-            rot = state.rot
-            neighbor_rot = jax.vmap(lambda rot, index: rot[index], in_axes=[None, 0])(
-                rot, dist_order
-            )
-            return jnp.concatenate((neighbor_rel_pos, neighbor_rot), axis=-1)
+            relative_rot = _compute_relative_rot(base_state, target_state)
+            return jnp.concatenate((relative_pos, relative_rot), axis=-1)
         else:
-            return neighbor_rel_pos
+            return relative_pos
 
-    return jax.jit(_get_comm)
+    return jax.jit(_get_relative_position)
+
+
+def _build_compute_neighbor_agent_mask(env_info: EnvInfo):
+    num_agents = env_info.num_agents
+    r = env_info.comm_r
+    base_mask = ~jnp.eye(num_agents, dtype=bool)
+
+    def _compute_neighbor_agent_mask(relative_pos: Array) -> Array:
+        """
+        compute mask for obtaining only neighboring agent communications.
+        neighbor is defined by distance between each agents.
+
+        Args:
+            relative_pos (Array): relative position between all agents
+
+        Returns:
+            Array: mask specifying neighboring agents
+        """
+        agent_dist = jnp.sqrt(jnp.sum(relative_pos**2, axis=-1))
+        neighbor_mask = agent_dist < r
+        return neighbor_mask * base_mask
+
+    return jax.jit(_compute_neighbor_agent_mask)

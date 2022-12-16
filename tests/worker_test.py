@@ -8,9 +8,7 @@ from omegaconf import OmegaConf
 @pytest.fixture
 def setup():
 
-    env_config = hydra.utils.instantiate(
-        OmegaConf.load("scripts/config/env/random.yaml")
-    )
+    env_config = hydra.utils.instantiate(OmegaConf.load("scripts/config/env/grid.yaml"))
     return env_config
 
 
