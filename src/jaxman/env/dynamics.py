@@ -5,7 +5,7 @@ Affiliation: OMRON SINIC X / University of Tokyo
 """
 
 from functools import partial
-from typing import Callable, NamedTuple
+from typing import Callable, NamedTuple, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -39,12 +39,15 @@ def _build_observe(
     _get_relative_positions = _build_get_relative_positions(env_info)
     _get_mask = _build_compute_neighbor_agent_mask(env_info)
 
-    def _observe(state: AgentState, task_info: TaskInfo) -> AgentObservation:
+    def _observe(
+        state: AgentState, task_info: TaskInfo, not_finished_agent: Array
+    ) -> AgentObservation:
         """_observe function
 
         Args:
             state (AgentState): agent current state
             task_info (TaskInfo): task information
+            not_finished_agent (Array): array on whether each agent completed the their episode.
 
         Returns:
             AgentObservation: agent observation
@@ -61,7 +64,7 @@ def _build_observe(
             planner_act = planner._act(state, task_info)
         relative_positions = _get_relative_positions(state, state)
         intentions = jnp.zeros_like(relative_positions)
-        masks = _get_mask(relative_positions[:, :, :2])
+        masks = _get_mask(relative_positions[:, :, :2], not_finished_agent)
 
         return AgentObservation(
             state=state,
@@ -254,7 +257,7 @@ def _build_step(
         ang = possible_next_state.ang * not_finished_agents
         next_state = possible_next_state._replace(vel=vel, ang=ang)
 
-        observation = _observe(next_state, task_info)
+        observation = _observe(next_state, task_info, jnp.logical_not(done))
 
         return observation, rew, done, new_trial_info
 
@@ -341,17 +344,66 @@ def _build_compute_next_state(is_discrete: bool, is_diff_drive: bool):
         Returns:
             AgentState: agent next state
         """
-        action = discrete_action_list[action]
-        vel = jnp.expand_dims(action[0], -1)
-        ang = jnp.expand_dims(action[1], -1)
-        next_rot = (state.rot + ang) % 4
-        next_pos = state.pos + jnp.array(
-            vel
-            * jnp.hstack(
-                [jnp.sin(next_rot * jnp.pi / 2), jnp.cos(next_rot * jnp.pi / 2)]
-            ),
-            dtype=int,
-        )
+
+        def compute_actions(action: Array, rot: Array) -> Tuple[Array, Array]:
+            """compute pos and rot action in diff drive agent
+
+            Args:
+                action (Array): agent raw action
+                rot (Array): agent current rotation
+
+            Returns:
+                Array: [pos_action, rot_action]
+            """
+            # Stay
+            def action_0(rot):
+                return jnp.array([0, 0], dtype=int), jnp.array([0], dtype=int)
+
+            # Go
+            def action_1(rot):
+                pos_action = move_with_rot(rot, 1)
+                rot_action = jnp.array([0], dtype=int)
+                return pos_action, rot_action
+
+            # Back
+            def action_2(rot):
+                pos_action = move_with_rot(rot, -1)
+                rot_action = jnp.array([0], dtype=int)
+                return pos_action, rot_action
+
+            # Turn Left
+            def action_3(rot):
+                return jnp.array([0, 0], dtype=int), jnp.array([-1], dtype=int)
+
+            # Turn Right
+            def action_4(rot):
+                return jnp.array([0, 0], dtype=int), jnp.array([1], dtype=int)
+
+            def move_with_rot(rot, way):
+                def move_0():
+                    return jnp.array([0, 1], dtype=int)
+
+                def move_1():
+                    return jnp.array([1, 0], dtype=int)
+
+                def move_2():
+                    return jnp.array([0, -1], dtype=int)
+
+                def move_3():
+                    return jnp.array([-1, 0], dtype=int)
+
+                direction = jax.lax.switch(rot, [move_0, move_1, move_2, move_3])
+                return (direction * way).astype(int)
+
+            return jax.lax.switch(
+                action, [action_0, action_1, action_2, action_3, action_4], rot
+            )
+
+        pos_action, rot_action = compute_actions(action, state.rot[0])
+        next_pos = state.pos + pos_action
+        next_rot = (state.rot + rot_action) % 4
+        vel = jnp.array([0], dtype=int)
+        ang = jnp.array([0], dtype=int)
         next_state = AgentState(pos=next_pos, rot=next_rot, vel=vel, ang=ang)
         next_state.is_valid()
         return next_state
@@ -670,7 +722,7 @@ def _build_get_discrete_obs_pos(env_info: EnvInfo):
         Returns:
             Array: flatten obs and agent position
         """
-        obs_map = jnp.pad(obs_map, fov_r, mode="constant", constant_values=1)
+        obs_map = jnp.pad(obs_map, fov_r, mode="constant", constant_values=0)
         obs_agent_map = jax.lax.fori_loop(
             0,
             num_agents,
@@ -863,19 +915,26 @@ def _build_compute_neighbor_agent_mask(env_info: EnvInfo):
     r = env_info.comm_r
     base_mask = ~jnp.eye(num_agents, dtype=bool)
 
-    def _compute_neighbor_agent_mask(relative_pos: Array) -> Array:
+    def _compute_neighbor_agent_mask(
+        relative_pos: Array, not_finished_agent: Array
+    ) -> Array:
         """
         compute mask for obtaining only neighboring agent communications.
         neighbor is defined by distance between each agents.
 
         Args:
             relative_pos (Array): relative position between all agents
+            not_finished_agent (Array): array on whether each agent completed the their episode.
 
         Returns:
             Array: mask specifying neighboring agents
         """
         agent_dist = jnp.sqrt(jnp.sum(relative_pos**2, axis=-1))
         neighbor_mask = agent_dist < r
-        return neighbor_mask * base_mask
+        neighbor_mask = neighbor_mask * base_mask
+        neighbor_done_mask = jax.vmap(lambda a, b: a * b, in_axes=(0, None))(
+            neighbor_mask, not_finished_agent
+        )
+        return neighbor_done_mask
 
     return jax.jit(_compute_neighbor_agent_mask)

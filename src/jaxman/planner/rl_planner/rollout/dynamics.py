@@ -45,7 +45,6 @@ def _build_compute_agent_intention(
 
     def _compute_agents_intentions(
         observations: AgentObservation,
-        not_finished_agents: Array,
         actor_params: FrozenDict,
     ) -> Array:
         """
@@ -53,7 +52,6 @@ def _build_compute_agent_intention(
 
         Args:
             observations (AgentObservation): current agents' observations
-            not_finished_agents (Array): not finished agent. (agent who can move in this time step)
             actor_params (FrozenDict): actor parameters
 
         Returns:
@@ -67,10 +65,6 @@ def _build_compute_agent_intention(
         else:
             actions = action_dist.mean()
 
-        actions = jax.vmap(lambda action, mask: action * mask)(
-            actions, not_finished_agents
-        )
-
         # compute relative position
         next_possible_state = jax.vmap(_compute_next_state)(state, actions, agent_info)
 
@@ -81,7 +75,6 @@ def _build_compute_agent_intention(
 
 
 def _build_rollout_step(env_info: EnvInfo, agent_info: AgentInfo, actor_fn: Callable):
-    use_intentions = env_info.use_intentions
     _env_step = _build_step(
         env_info, agent_info, env_info.is_discrete, env_info.is_diff_drive
     )
@@ -111,12 +104,8 @@ def _build_rollout_step(env_info: EnvInfo, agent_info: AgentInfo, actor_fn: Call
         next_observatinos, rews, dones, new_trial_info = _env_step(
             state, actions, task_info, trial_info
         )
-        not_finished_agents = ~dones
-        if use_intentions:
-            intentions = _compute_intentions(
-                next_observatinos, not_finished_agents, actor_params
-            )
-            next_observatinos = next_observatinos._replace(intentions=intentions)
+        next_intentions = _compute_intentions(next_observatinos, actor_params)
+        next_observatinos = next_observatinos._replace(intentions=next_intentions)
 
         return next_observatinos, rews, dones, new_trial_info
 

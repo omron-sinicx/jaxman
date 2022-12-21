@@ -67,12 +67,12 @@ class Carry(NamedTuple):
             vel=jnp.zeros_like(task_info.start_rots),
             ang=jnp.zeros_like(task_info.start_rots),
         )
-        observations = _observe(state, task_info)
+        observations = _observe(state, task_info, jnp.ones((num_agents,), dtype=bool))
         trial_info = TrialInfo().reset(env_info.num_agents)
         rewards = jnp.zeros((num_agents,))
         dones = jnp.array([False] * num_agents)
 
-        intentions = _compute_intentions(observations, ~dones, actor_params)
+        intentions = _compute_intentions(observations, actor_params)
         observations = observations._replace(intentions=intentions)
 
         if env_info.is_discrete:

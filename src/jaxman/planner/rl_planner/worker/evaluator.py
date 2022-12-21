@@ -176,7 +176,7 @@ class Evaluator:
             carry = self._rollout_fn(key, actor_params, self.instance.obs)
             reward.append(carry.rewards.mean())
             trial_info = carry.trial_info
-            success.append(trial_info.is_success)
+            success.append(int(trial_info.is_success))
             if trial_info.is_success:
                 makespan.append(trial_info.makespan)
                 sum_of_cost.append(trial_info.sum_of_cost)

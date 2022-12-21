@@ -50,6 +50,7 @@ dev = [
     "ray",
     "moviepy",
     "bootstrapped",
+    "cpprb",
 ]
 
 [tool.pysen]

@@ -6,8 +6,9 @@ target_entropy_ratio: 0.05
 batch_size: 256
 auto_temp_tuning: True
 save_interval: 100000
+warmup_iters: 10000
 # buffer
 capacity: 1500000
-warmup_iters: 10000
+use_per: False
 # evaluate
 eval_iters: 1000

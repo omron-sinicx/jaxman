@@ -125,7 +125,7 @@ class Learner:
             self.loss.append(loss_info)
 
             # store new actor params in shared memory
-            if i % 10 == 0:
+            if i % 3 == 0:
                 self.store_params()
             if i % self.save_interval == 0:
                 self.save_model()

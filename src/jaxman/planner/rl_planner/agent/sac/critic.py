@@ -158,13 +158,12 @@ def update(
         )
         q1 = jax.vmap(lambda q_values, i: q_values[i])(q1, batch.actions)
         q2 = jax.vmap(lambda q_values, i: q_values[i])(q2, batch.actions)
-        td_error = (q1.reshape(batch_size) - target_q) ** 2 + (
+        critic_loss = (q1.reshape(batch_size) - target_q) ** 2 + (
             q2.reshape(batch_size) - target_q
         ) ** 2
 
-        critic_loss = td_error.mean()
-        assert_shape(td_error, (batch_size,))
-        return critic_loss
+        assert_shape(critic_loss, (batch_size,))
+        return critic_loss.mean()
 
     def continuous_loss_fn(params: FrozenDict) -> Array:
         batch_size = batch.observations.shape[0]
@@ -199,10 +198,12 @@ def update(
             batch.neighbor_masks,
             batch.actions,
         )
-        td_error = (jnp.squeeze(q1) - target_q) ** 2 + (jnp.squeeze(q2) - target_q) ** 2
-        assert_shape(td_error, (batch_size,))
-        critic_loss = td_error.mean()
-        return critic_loss
+        critic_loss = (jnp.squeeze(q1) - target_q) ** 2 + (
+            jnp.squeeze(q2) - target_q
+        ) ** 2
+
+        assert_shape(critic_loss, (batch_size,))
+        return critic_loss.mean()
 
     if is_discrete:
         grad_fn = jax.value_and_grad(discrete_loss_fn, has_aux=False)
@@ -210,4 +211,6 @@ def update(
         grad_fn = jax.value_and_grad(continuous_loss_fn, has_aux=False)
     loss, grads = grad_fn(critic.params)
     critic = critic.apply_gradients(grads=grads)
-    return critic, {"critic_loss": loss}
+    return critic, {
+        "critic_loss": loss,
+    }

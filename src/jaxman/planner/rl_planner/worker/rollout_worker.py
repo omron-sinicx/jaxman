@@ -72,14 +72,15 @@ class RolloutWorker:
 
         while True:
             # rollout episode
-            time.sleep(0.1)
+            # time.sleep(0.1)
+            time.sleep(0.01)
             key, subkey = jax.random.split(key)
             carry = self._rollout_fn(subkey, actor_params, self.instance.obs)
 
             experience = carry.experience
             self.global_buffer.add.remote(experience)
 
-            if self.counter % 20 == 0:
+            if self.counter % 3 == 0:
                 # update parameters
                 (
                     actor_params,
