@@ -121,7 +121,9 @@ class JaxMANEnv(gym.Env):
 
         # initialize trial information
         self.trial_info = TrialInfo().reset(self._env_info.num_agents)
-        return self._observe(self.state, self.task_info)
+        return self._observe(
+            self.state, self.task_info, jnp.ones((self.num_agents,), dtype=bool)
+        )
 
     def render(self, state_traj=None, dones=None, high_quality=True) -> np.Array:
         return render_map(
