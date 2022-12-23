@@ -112,6 +112,13 @@ class GlobalBuffer(Buffer):
             TrainBatch: sampled batch data
         """
         with self.lock:
-            data = _sample_experience(self, batch_size, self.num_agents, self.comm_dim)
+            data = _sample_experience(
+                self,
+                batch_size,
+                self.num_agents,
+                self.comm_dim,
+                self.num_items,
+                self.item_dim,
+            )
             self.frame += 1
             return data

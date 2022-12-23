@@ -1,6 +1,6 @@
 import hydra
 import pytest
-from jaxman.env.env import JaxMANEnv
+from jaxman.env.navigation.env import JaxMANEnv
 from jaxman.planner.rl_planner.memory.dataset import Buffer
 from omegaconf import OmegaConf
 

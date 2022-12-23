@@ -5,7 +5,7 @@ Affiliation: OMRON SINIC X / University of Tokyo
 """
 
 from functools import partial
-from typing import Dict, Tuple, Union
+from typing import Dict, NamedTuple, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -25,12 +25,19 @@ from .temperature import create_temp
 from .temperature import update as update_temperature
 
 
+class SAC(NamedTuple):
+    actor: TrainState
+    critic: TrainState
+    target_critic: TrainState
+    temperature: TrainState
+
+
 def create_sac_agent(
     observation_space: Dict,
     action_space: Union[Box, Discrete],
     model_config: DictConfig,
     key: PRNGKey,
-) -> Tuple[TrainState, TrainState, TrainState, TrainState, PRNGKey]:
+) -> Tuple[SAC, PRNGKey]:
     """create sac agent
 
     Args:
@@ -49,7 +56,8 @@ def create_sac_agent(
         observation_space, action_space, model_config, critic_key
     )
     temp = create_temp(model_config, temp_key)
-    return actor, critic, target_critic, temp, key
+    sac = SAC(actor, critic, target_critic, temp)
+    return sac, key
 
 
 def restore_sac_actor(
@@ -101,10 +109,7 @@ def restore_sac_actor(
 )
 def _update_sac_jit(
     key: PRNGKey,
-    actor: TrainState,
-    critic: TrainState,
-    target_critic: TrainState,
-    temp: TrainState,
+    sac: SAC,
     batch: TrainBatch,
     gamma: float,
     tau: float,
@@ -139,43 +144,42 @@ def _update_sac_jit(
     key, subkey = jax.random.split(key)
     new_critic, critic_info = update_critic(
         subkey,
-        actor,
-        critic,
-        target_critic,
-        temp,
+        sac.actor,
+        sac.critic,
+        sac.target_critic,
+        sac.temperature,
         batch,
         gamma,
         is_discrete,
     )
     if update_target:
-        new_target_critic = update_target_critic(new_critic, target_critic, tau)
+        new_target_critic = update_target_critic(new_critic, sac.target_critic, tau)
     else:
-        new_target_critic = target_critic
+        new_target_critic = sac.target_critic
 
     if train_actor:
         key, subkey = jax.random.split(key)
         new_actor, actor_info = update_actor(
-            subkey, actor, new_critic, temp, batch, is_discrete
+            subkey, sac.actor, new_critic, sac.temperature, batch, is_discrete
         )
         if auto_temp_tuning:
             new_temp, alpha_info = update_temperature(
-                temp, actor_info["entropy"], target_entropy
+                sac.temperature, actor_info["entropy"], target_entropy
             )
         else:
-            new_temp = temp
-            alpha = jnp.exp(temp.params["log_temp"]).astype(float)
+            new_temp = sac.temperature
+            alpha = jnp.exp(sac.temperature.params["log_temp"]).astype(float)
             alpha_info = {"temperature": alpha}
+        actor_info.update(entropy=actor_info["entropy"].mean())
     else:
-        new_actor = actor
+        new_actor = sac.actor
         actor_info = {}
-        new_temp = temp
+        new_temp = sac.temperature
         alpha_info = {}
+    new_sac = SAC(new_actor, new_critic, new_target_critic, new_temp)
 
     return (
         key,
-        new_actor,
-        new_critic,
-        new_target_critic,
-        new_temp,
+        new_sac,
         {**critic_info, **actor_info, **alpha_info},
     )

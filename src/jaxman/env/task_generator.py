@@ -12,7 +12,7 @@ from CMap2D import CMap2D
 
 from .core import AgentState
 from .obstacle import ObstacleMap, ObstacleSphere, contours_to_edges, cross_road, room
-from .sampler import sample_random_pos, sample_start_rots
+from .sampler import sample_random_agent_item_pos, sample_random_pos, sample_start_rots
 
 
 @partial(
@@ -63,6 +63,64 @@ def sample_valid_start_goal(
     return starts, start_rots, goals
 
 
+@partial(
+    jax.jit,
+    static_argnames=(
+        "num_agents",
+        "num_items",
+        "sample_type",
+        "is_discrete",
+        "is_diff_drive",
+    ),
+)
+def sample_valid_agent_item_pos(
+    key: PRNGKey,
+    rads: Array,
+    obs: ObstacleMap,
+    num_agents: int,
+    num_items: int,
+    is_discrete: bool,
+    is_diff_drive: bool,
+    no_overlap: bool = True,
+    sample_type: str = "uniform",
+    num_max_trials: int = 200,
+) -> tuple[Array, Array, Array]:
+    """
+    Sample new problem instance consisting of a collection of start poses and goal positions
+
+    Args:
+        key (PRNGKey): jax prng key
+        rads (Array): agent radius
+        obs (ObstacleMap): obstacle map
+        num_agents (int): number of agents
+        is_discrete (bool): whether environment action space is discrete or not
+        is_diff_drive (bool): whether environment is diff drive env or not
+        no_overlap (bool, optional): whether or not to allow each vertices to be overlapped within agent radius. Defaults to False.
+        num_max_trials (int, optional): maximum number of resampling. Defaults to 100.
+
+    Returns:
+        tuple[AgentState, Array, PRNGKey]: start position, start rotation, goal position
+    """
+
+    key_pos, key_pose = jax.random.split(key, 2)
+    agent_starts, item_starts, item_goals = sample_random_agent_item_pos(
+        key_pos,
+        rads,
+        obs,
+        num_agents,
+        num_items,
+        is_discrete,
+        no_overlap,
+        sample_type,
+        num_max_trials,
+    )
+    agent_start_rots = sample_start_rots(
+        key_pose, num_agents, is_discrete, is_diff_drive
+    )
+
+    return agent_starts, agent_start_rots, item_starts, item_goals
+
+
 # obstacle map generator
 def generate_obs_map(
     obs_type: str,
@@ -98,6 +156,10 @@ def generate_obs_map(
         )
     else:
         occupancy = generata_image_base_occupancy_map(obs_type, level, map_size)
+    occupancy[0, :] = 1
+    occupancy[-1, :] = 1
+    occupancy[:, 0] = 1
+    occupancy[:, -1] = 1
 
     cmap2d = CMap2D()
     cmap2d.from_array(occupancy, (0, 0), 1.0 / map_size)
@@ -141,10 +203,6 @@ def generate_random_occupancy_map(
         circle_obs = circle_obs.at[:, 2].add(obs_size_lower_bound / 2)
         circle_obs = [ObstacleSphere(pos=o[:2], rad=o[2]) for o in circle_obs]
         occupancy = np.dstack([x.draw_2d(map_size) for x in circle_obs]).max(-1)
-    occupancy[0, :] = 1
-    occupancy[-1, :] = 1
-    occupancy[:, 0] = 1
-    occupancy[:, -1] = 1
     return occupancy
 
 

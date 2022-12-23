@@ -28,7 +28,7 @@ class Temperature(nn.Module):
             "log_temp",
             init_fn=lambda key: jnp.full((), jnp.log(self.initial_temperature)),
         )
-        return jnp.exp(log_temp)
+        return log_temp
 
 
 def create_temp(config, key):
@@ -69,8 +69,8 @@ def update(
     """
 
     def temperature_loss_fn(temp_params):
-        temperature = temp.apply_fn({"params": temp_params})
-        temp_loss = temperature * (entropy - target_entropy).mean()
+        log_temp = temp.apply_fn({"params": temp_params})
+        temp_loss = -log_temp * (target_entropy - entropy).mean()
         return temp_loss
 
     grad_fn = jax.value_and_grad(temperature_loss_fn, has_aux=False)

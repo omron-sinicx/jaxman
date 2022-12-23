@@ -1,7 +1,7 @@
 import hydra
 import jax
 import pytest
-from jaxman.env.env import JaxMANEnv
+from jaxman.env.navigation.env import JaxMANEnv
 from jaxman.planner.rl_planner.agent.sac.sac import create_sac_agent
 from omegaconf import OmegaConf
 

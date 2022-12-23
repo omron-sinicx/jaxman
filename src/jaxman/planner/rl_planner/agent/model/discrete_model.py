@@ -13,6 +13,7 @@ from .base_model import ObsEncoder
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
+from jaxman.planner.rl_planner.core import AgentObservation
 
 
 class Critic(fnn.Module):
@@ -21,26 +22,19 @@ class Critic(fnn.Module):
     action_dim: int
 
     @fnn.compact
-    def __call__(
-        self,
-        observations: Array,
-        communications: Array,
-        neighbor_masks: Array,
-    ) -> Array:
+    def __call__(self, observations: AgentObservation) -> Array:
         """
         calculate q value
 
         Args:
-            observations (Array): observations. shape: (batch_size, obs_dim)
-            communications (Array): communications with neighbor agents. shape: (batch_size, num_comm_agents, comm_dim)
-            neighbor_masks (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
+            observations (AgentObservation): NamedTuple for observation of agent. consisting of basic observations and communication
 
         Returns:
             Array: q value
         """
         # encode observation, communications and action
         encoder = ObsEncoder(self.hidden_dim, self.msg_dim)
-        h = encoder(observations, communications, neighbor_masks)
+        h = encoder(observations)
 
         h = fnn.Dense(self.hidden_dim)(h)
         h = fnn.relu(h)
@@ -55,15 +49,11 @@ class DoubleCritic(fnn.Module):
     action_dim: int
 
     @fnn.compact
-    def __call__(
-        self, observations: Array, communications: Array, neighbor_masks: Array
-    ) -> Array:
+    def __call__(self, observations: AgentObservation) -> Array:
         """calculate double q
 
         Args:
-            observations (Array): agent observation
-            communications (Array): communications with neighbor agents.
-            neighbor_masks (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
+            observations (AgentObservation): NamedTuple for observation of agent. consisting of basic observations and communication
 
         Returns:
             Array: double q
@@ -78,8 +68,6 @@ class DoubleCritic(fnn.Module):
         )
         qs = VmapCritic(self.hidden_dim, self.msg_dim, self.action_dim)(
             observations,
-            communications,
-            neighbor_masks,
         )
         q1 = qs[0]
         q2 = qs[1]
@@ -92,19 +80,12 @@ class Actor(fnn.Module):
     action_dim: int
 
     @fnn.compact
-    def __call__(
-        self,
-        observations: Array,
-        communications: Array,
-        neighbor_masks: Array,
-    ) -> Array:
+    def __call__(self, observations: AgentObservation) -> Array:
         """
         calculate agent action distribution
 
         Args:
-            observations (Array): observations. shape: (batch_size, obs_dim)
-            communications (Array): communications with neighbor agents. shape: (batch_size, num_comm_agents, comm_dim)
-            neighbor_masks (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
+            observations (AgentObservation): NamedTuple for observation of agent. consisting of basic observations and communication
         Returns:
             Array: action distribution
         """
@@ -112,8 +93,6 @@ class Actor(fnn.Module):
         encoder = ObsEncoder(self.hidden_dim, self.msg_dim)
         h = encoder(
             observations,
-            communications,
-            neighbor_masks,
         )
 
         action_logits = fnn.Dense(self.hidden_dim)(h)
@@ -121,5 +100,5 @@ class Actor(fnn.Module):
         action_logits = fnn.Dense(self.action_dim)(action_logits)
         action_probs = fnn.softmax(action_logits, axis=-1)
 
-        base_dist = tfd.Categorical(probs=action_probs)
-        return base_dist
+        # base_dist = tfd.Categorical(probs=action_probs)
+        return action_probs

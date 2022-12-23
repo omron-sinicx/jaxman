@@ -11,9 +11,10 @@ import jax.numpy as jnp
 from chex import Array, PRNGKey
 from omegaconf.dictconfig import DictConfig
 
-from .core import AgentInfo, EnvInfo, TaskInfo
-from .obstacle import ObstacleMap
-from .task_generator import generate_obs_map, sample_valid_start_goal
+from ..core import AgentInfo, EnvInfo
+from ..obstacle import ObstacleMap
+from ..task_generator import generate_obs_map, sample_valid_start_goal
+from .core import TaskInfo
 
 
 # @dataclass
@@ -21,7 +22,9 @@ class Instance:
     """Problem instance of multi-agent navigation"""
 
     # some values have None as a default value to ensure backward compatibility
+    env_name: str
     num_agents: int
+    num_items: int
     max_vels: Array
     max_ang_vels: Array
     rads: Array
@@ -33,6 +36,7 @@ class Instance:
     scan_range: float
     timeout: int
     goal_reward: float
+    dont_hold_item_penalty: float
     crash_penalty: float
     time_penalty: float
     starts: Array
@@ -42,7 +46,9 @@ class Instance:
     is_diff_drive: bool
 
     def __init__(self, config: DictConfig) -> None:
+        self.env_name = config.env_name
         self.num_agents = config.num_agents
+        self.num_items = 0
         self.map_size = config.map_size
         self.max_vels = jnp.array([[config.max_vel] for _ in range(self.num_agents)])
         self.min_vels = jnp.array([[config.min_vel] for _ in range(self.num_agents)])
@@ -65,6 +71,8 @@ class Instance:
         self.use_intentions = config.use_intentions
         self.timeout = config.timeout
         self.goal_reward = config.goal_reward
+        self.dist_reward = config.dist_reward
+        self.dont_hold_item_penalty = config.dont_hold_item_penalty
         self.crash_penalty = config.crash_penalty
         self.time_penalty = config.time_penalty
 
@@ -105,7 +113,9 @@ class Instance:
         """
 
         env_info = EnvInfo(
+            env_name="navigation",
             num_agents=int(self.num_agents),
+            num_items=0,
             occupancy_map=self.obs.occupancy,
             sdf_map=self.obs.sdf,
             edges=self.obs.edges,
@@ -116,6 +126,8 @@ class Instance:
             use_intentions=bool(self.use_intentions),
             timeout=int(self.timeout),
             goal_reward=self.goal_reward,
+            dist_reward=self.dist_reward,
+            dont_hold_item_penalty=self.dont_hold_item_penalty,
             crash_penalty=self.crash_penalty,
             time_penalty=self.time_penalty,
             is_discrete=self.is_discrete,

@@ -5,7 +5,11 @@ import hydra
 import jax
 import jax.numpy as jnp
 import ray
-from jaxman.env.env import JaxMANEnv
+from jaxman.env.navigation.env import JaxMANEnv
+
+# from jaxman.env.navigation.env import JaxMANEnv
+from jaxman.env.pick_and_delivery.env import JaxPandDEnv
+from jaxman.planner.rl_planner.agent.dqn.dqn import create_dqn_agent
 from jaxman.planner.rl_planner.agent.sac.sac import create_sac_agent, restore_sac_actor
 from jaxman.planner.rl_planner.logger import LogResult
 from jaxman.planner.rl_planner.worker import (
@@ -34,23 +38,30 @@ def main(config):
         writer = SummaryWriter(logdir=f"./tb/seed_{seed}")
 
         logger = LogResult(writer, config)
-
         # initialize enrironment
-        env = JaxMANEnv(config.env, config.seed)
+        if config.env.env_name == "navigation":
+            env = JaxMANEnv(config.env, config.seed)
+        else:
+            env = JaxPandDEnv(config.env, config.seed)
         observation_space = env.observation_space
         action_space = env.action_space
         buffer = GlobalBuffer.remote(observation_space, action_space, config.train)
 
         key = jax.random.PRNGKey(config.seed)
-        actor, critic, target_critic, temp, key = create_sac_agent(
+        sac, key = create_dqn_agent(
             observation_space,
             action_space,
             config.model,
             key,
         )
-        actor = restore_sac_actor(
-            actor, config.env.is_discrete, config.env.is_diff_drive, "../../../../model"
-        )
+        if config.train.use_pretrained_model:
+            actor = restore_sac_actor(
+                sac.actor,
+                config.env.is_discrete,
+                config.env.is_diff_drive,
+                f"../../../../../model/{config.env.env_name}",
+            )
+            sac = sac._replace(actor=actor)
 
         action_scale = None
         action_bias = None
@@ -63,10 +74,7 @@ def main(config):
         # target_entropy = -action_space.n/2
         learner = Learner.remote(
             buffer,
-            actor,
-            critic,
-            target_critic,
-            temp,
+            sac,
             action_scale,
             action_bias,
             target_entropy,
@@ -76,14 +84,14 @@ def main(config):
         rollout_worker = RolloutWorker.remote(
             buffer,
             learner,
-            actor,
+            sac.actor,
             env.instance,
             config.seed,
         )
         rollout_worker.run.remote()
         evaluator = Evaluator.remote(
             learner,
-            actor,
+            sac.actor,
             env.instance,
             config.seed,
         )

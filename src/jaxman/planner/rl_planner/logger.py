@@ -84,19 +84,20 @@ class LogResult:
             self.writer.add_scalar(
                 f"evaluation/reward", np.mean(eval_reward), self.total_episodes
             )
+            # TODO
             for i in range(len(trial_info)):
                 self.total_episodes += 1
                 ##### trial information #####
-                collided = sum(trial_info[i].collided)
-                self.writer.add_scalar(
-                    "evaluation/collided", collided, self.total_episodes
-                )
+                # collided = sum(trial_info[i].collided)
+                # self.writer.add_scalar(
+                #     "evaluation/collided", collided, self.total_episodes
+                # )
                 solved = sum(trial_info[i].solved)
                 self.writer.add_scalar("evaluation/solved", solved, self.total_episodes)
-                timeout = sum(trial_info[i].timeout)
-                self.writer.add_scalar(
-                    "evaluation/timeout", timeout, self.total_episodes
-                )
+                # timeout = sum(trial_info[i].timeout)
+                # self.writer.add_scalar(
+                #     "evaluation/timeout", timeout, self.total_episodes
+                # )
                 is_success = trial_info[i].is_success
                 self.writer.add_scalar(
                     "evaluation/is_success",
@@ -118,23 +119,23 @@ class LogResult:
                         self.total_episodes,
                     )
 
-                # self.csv_writer.writerow(
-                #     [
-                #         self.total_episodes,
-                #         jnp.mean(eval_reward[i]),
-                #         success,
-                #         delay_cov,
-                #         delay_mean,
-                #         delay_max,
-                #         makespan,
-                #         sum_of_cost,
-                #         sw_cov,
-                #         sw_mean,
-                #         sw_max,
-                #         sw_mk,
-                #         sw_soc,
-                #     ]
-                # )
+            # self.csv_writer.writerow(
+            #     [
+            #         self.total_episodes,
+            #         jnp.mean(eval_reward[i]),
+            #         success,
+            #         delay_cov,
+            #         delay_mean,
+            #         delay_max,
+            #         makespan,
+            #         sum_of_cost,
+            #         sw_cov,
+            #         sw_mean,
+            #         sw_max,
+            #         sw_mk,
+            #         sw_soc,
+            #     ]
+            # )
 
         if animation is not None:
             self.writer.add_video("video", animation, self.total_episodes)

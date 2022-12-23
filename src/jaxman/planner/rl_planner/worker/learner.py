@@ -6,7 +6,8 @@ Affiliation: OMRON SINIC X / University of Tokyo
 """
 
 import threading
-from typing import Tuple
+import time
+from typing import Tuple, Union
 
 import jax
 import numpy as np
@@ -15,7 +16,8 @@ from flax.training import checkpoints
 from flax.training.train_state import TrainState
 from omegaconf.dictconfig import DictConfig
 
-from ..agent.sac.sac import _update_sac_jit
+from ..agent.dqn.dqn import DQN, _update_dqn_jit
+from ..agent.sac.sac import SAC, _update_sac_jit
 from .global_buffer import GlobalBuffer
 
 
@@ -24,10 +26,7 @@ class Learner:
     def __init__(
         self,
         buffer: GlobalBuffer,
-        actor: TrainState,
-        critic: TrainState,
-        target_critic: TrainState,
-        temp: TrainState,
+        agent: Union[SAC, DQN],
         action_scale: np.ndarray,
         action_bias: np.ndarray,
         target_entropy: bool,
@@ -53,10 +52,7 @@ class Learner:
 
         # agent
         self.buffer = buffer
-        self.actor = actor
-        self.critic = critic
-        self.target_critic = target_critic
-        self.temp = temp
+        self.agent = agent
 
         self.is_discrete = config.env.is_discrete
         self.num_agent = config.env.num_agents
@@ -77,10 +73,11 @@ class Learner:
         self.last_counter = 0
         self.loss = []
 
-        actor_params = self.actor.params
+        actor_params = self.agent.actor.params
         self.actor_params_id = ray.put(actor_params)
-        critic_params = self.critic.params
-        self.critic_params_id = ray.put(critic_params)
+        # critic_params = self.critic.params
+        self.critic_params_id = ray.put(None)
+        self.train_actor_id = ray.put(self.train_actor)
 
     def run(self) -> None:
         """
@@ -99,26 +96,17 @@ class Learner:
             loss_info = {}
             self.train_actor = i > self.warmup_iters
             data = ray.get(ray.get(self.buffer.get_batched_data.remote()))
-            (
+            # time.sleep(0.03)
+            (key, self.agent, loss_info,) = _update_dqn_jit(
                 key,
-                self.actor,
-                self.critic,
-                self.target_critic,
-                self.temp,
-                loss_info,
-            ) = _update_sac_jit(
-                key,
-                self.actor,
-                self.critic,
-                self.target_critic,
-                self.temp,
+                self.agent,
                 data,
                 self.gamma,
                 self.tau,
                 self.is_discrete,
                 self.target_entropy,
-                True,  # carry.step % carry.target_update_period == 0,
                 self.auto_temp_tuning,
+                True,  # carry.step % carry.target_update_period == 0,
                 self.train_actor,
             )
 
@@ -137,16 +125,17 @@ class Learner:
         """
         store up to data actor parameters in shared memory
         """
-        actor_params = self.actor.params
+        actor_params = self.agent.actor.params
         self.actor_params_id = ray.put(actor_params)
-        critic_params = self.critic.params
-        self.critic_params_id = ray.put(critic_params)
+        # critic_params = self.critic.params
+        self.critic_params_id = ray.put(None)
+        self.train_actor_id = ray.put(self.train_actor)
 
     def get_params(self):
         """
         return agent parameter id
         """
-        return self.actor_params_id, self.critic_params_id
+        return self.actor_params_id, self.critic_params_id, self.train_actor_id
 
     def stats(self, interval: int) -> Tuple[bool, dict, int]:
         """
@@ -174,29 +163,29 @@ class Learner:
         """
         checkpoints.save_checkpoint(
             ckpt_dir=self.save_dir,
-            target=self.actor,
+            target=self.agent.actor,
             prefix="actor_checkpoint_",
             step=self.counter,
             overwrite=True,
         )
-        checkpoints.save_checkpoint(
-            ckpt_dir=self.save_dir,
-            target=self.critic,
-            prefix="critic_checkpoint_",
-            step=self.counter,
-            overwrite=True,
-        )
-        checkpoints.save_checkpoint(
-            ckpt_dir=self.save_dir,
-            target=self.target_critic,
-            prefix="target_critic_checkpoint_",
-            step=self.counter,
-            overwrite=True,
-        )
-        checkpoints.save_checkpoint(
-            ckpt_dir=self.save_dir,
-            target=self.temp,
-            prefix="temp_checkpoint_",
-            step=self.counter,
-            overwrite=True,
-        )
+        # checkpoints.save_checkpoint(
+        #     ckpt_dir=self.save_dir,
+        #     target=self.critic,
+        #     prefix="critic_checkpoint_",
+        #     step=self.counter,
+        #     overwrite=True,
+        # )
+        # checkpoints.save_checkpoint(
+        #     ckpt_dir=self.save_dir,
+        #     target=self.target_critic,
+        #     prefix="target_critic_checkpoint_",
+        #     step=self.counter,
+        #     overwrite=True,
+        # )
+        # checkpoints.save_checkpoint(
+        #     ckpt_dir=self.save_dir,
+        #     target=self.temp,
+        #     prefix="temp_checkpoint_",
+        #     step=self.counter,
+        #     overwrite=True,
+        # )

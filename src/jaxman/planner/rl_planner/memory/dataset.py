@@ -10,6 +10,8 @@ import numpy as np
 from chex import Array
 from gym.spaces import Box, Dict, Discrete
 
+from ..core import AgentObservation
+
 
 class Buffer:
     def __init__(
@@ -41,8 +43,20 @@ class Buffer:
         self.num_agents = observation_space["comm"].shape[0]
         self.comm_dim = observation_space["comm"].shape[1]
         self.mask_dim = observation_space["mask"].shape[0]
+        if observation_space["item_pos"].shape[0] > 0:
+            self.num_items = observation_space["item_pos"].shape[0]
+            self.item_dim = observation_space["item_pos"].shape[1]
+            self.item_mask_dim = observation_space["item_mask"].shape[0]
+        else:
+            self.num_items = self.item_dim = self.item_mask_dim = 0
 
-        total_obs_dim = self.obs_dim + self.num_agents * self.comm_dim + self.mask_dim
+        total_obs_dim = (
+            self.obs_dim
+            + self.num_agents * self.comm_dim
+            + self.mask_dim
+            + self.item_dim * self.num_items
+            + self.item_mask_dim
+        )
         # buffer
         self.capacity = int(capacity)
         self.observations = np.zeros(
@@ -59,15 +73,11 @@ class Buffer:
 
 
 class TrainBatch(NamedTuple):
-    observations: Array
-    communications: Array
-    neighbor_masks: Array
+    observations: AgentObservation
     actions: Array
     rewards: Array
     masks: Array
-    next_observations: Array
-    next_communications: Array
-    next_neighbor_masks: Array
+    next_observations: AgentObservation
 
 
 class Experience(NamedTuple):

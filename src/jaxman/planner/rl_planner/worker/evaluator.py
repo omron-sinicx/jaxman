@@ -17,11 +17,10 @@ import jax.numpy as jnp
 import numpy as np
 import ray
 from flax.training.train_state import TrainState
-from jaxman.env.core import TrialInfo
-from jaxman.env.instance import Instance
-from jaxman.env.viz import render_gif
+from jaxman.env import Instance, TrialInfo
+from jaxman.env.viz.viz import render_gif
 
-from ..rollout.rollout import build_rollout_episode
+from ..rollout.rollout import _build_rollout_episode
 from .learner import Learner
 
 
@@ -46,6 +45,7 @@ class Evaluator:
         self.learner = learner
         self.actor = actor
         self.instance = instance
+        self.env_name = instance.env_name
 
         self.seed = seed
 
@@ -55,9 +55,8 @@ class Evaluator:
         self.last_counter = 0
         self.animation = None
         self.done = False
-
-        self._rollout_fn = build_rollout_episode(
-            instance, actor.apply_fn, evaluate=False
+        self._rollout_fn = _build_rollout_episode(
+            instance, actor.apply_fn, evaluate=True
         )
 
     def run(self) -> None:
@@ -85,6 +84,7 @@ class Evaluator:
                 (
                     actor_params,
                     _,
+                    _,
                 ) = self._update_parameters()
 
             self.average_reward += carry.rewards
@@ -93,8 +93,24 @@ class Evaluator:
             # render episode trajectory
             if self.counter % 100 == 0:
                 steps = carry.episode_steps
-                state_traj = carry.experience.observations[:steps, :, :5]
-                last_state = carry.state.cat()
+                if self.env_name == "navigation":
+                    state_traj = carry.experience.observations[:steps, :, :5]
+                    last_state = carry.state.cat()
+                    item_traj = None
+                else:
+                    state_traj = jnp.concatenate(
+                        (
+                            carry.experience.observations[:steps, :, :5],
+                            jnp.expand_dims(carry.load_item_id_traj[:steps], -1),
+                        ),
+                        -1,
+                    )
+                    item_traj = carry.item_traj[:steps]
+                    last_state, last_item_pos = carry.state.cat()
+                    item_traj = jnp.vstack(
+                        (item_traj, jnp.expand_dims(last_item_pos, axis=0))
+                    )
+
                 state_traj = jnp.vstack(
                     (state_traj, jnp.expand_dims(last_state, axis=0))
                 )
@@ -103,13 +119,15 @@ class Evaluator:
                 dones = jnp.vstack((jnp.expand_dims(first_dones, 0), dones))
                 animation = render_gif(
                     state_traj,
-                    carry.task_info.goals,
+                    item_traj,
                     self.instance.rads,
-                    carry.task_info.obs.occupancy,
+                    carry.task_info,
                     carry.trial_info,
                     dones,
                     self.instance.is_discrete,
                     self.instance.is_diff_drive,
+                    high_quality=False,
+                    task_type=self.env_name,
                 )
                 self.animation = np.expand_dims(
                     np.transpose(np.array(animation), [0, 3, 1, 2]), 0
@@ -119,10 +137,13 @@ class Evaluator:
 
     def _update_parameters(self):
         """load actor parameters from learner"""
-        actor_params_id, critic_params_id = ray.get(self.learner.get_params.remote())
+        actor_params_id, critic_params_id, train_actor_id = ray.get(
+            self.learner.get_params.remote()
+        )
         actor_params = ray.get(actor_params_id)
         critic_params = ray.get(critic_params_id)
-        return actor_params, critic_params
+        train_actor = ray.get(train_actor_id)
+        return actor_params, critic_params, train_actor
 
     def stats(self, interval: int) -> Tuple[float, float, TrialInfo, np.ndarray]:
         """

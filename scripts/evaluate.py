@@ -12,7 +12,7 @@ import bootstrapped.stats_functions as bs_stats
 import hydra
 import jax
 import numpy as np
-from jaxman.env.env import JaxMANEnv
+from jaxman.env.navigation.env import JaxMANEnv
 from jaxman.planner.rl_planner.agent.sac.sac import create_sac_agent, restore_sac_actor
 from jaxman.planner.rl_planner.rollout.rollout import build_rollout_episode
 

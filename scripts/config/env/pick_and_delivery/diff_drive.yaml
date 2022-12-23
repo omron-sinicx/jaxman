@@ -1,7 +1,9 @@
-name: 'grid'
+env_name: "pick_and_delivery"
+name: 'diff_drive'
 is_discrete: True
-is_diff_drive: False
+is_diff_drive: True
 num_agents: 2
+num_items: 10
 map_size: 30
 max_vel: 0.03
 min_vel: -0.01

@@ -6,8 +6,10 @@ Affiliation: OMRON SINIC X / University of Tokyo
 import flax.linen as fnn
 import jax
 import jax.numpy as jnp
-from chex import Array, assert_shape
+from chex import Array
 from flax import linen as fnn
+
+from ...core import AgentObservation
 
 
 @jax.jit
@@ -33,6 +35,23 @@ def msg_attention(
     return weighted_value
 
 
+class AttentionBlock(fnn.Module):
+    hidden_dim: int
+    msg_dim: int
+
+    @fnn.compact
+    def __call__(self, h_obs, comm, mask):
+        h_comm = fnn.Dense(self.hidden_dim)(comm)
+        h_comm = fnn.relu(h_comm)
+
+        query = fnn.Dense(self.msg_dim)(h_obs)
+        key = fnn.Dense(self.msg_dim)(h_comm)
+        value = fnn.Dense(self.msg_dim)(h_comm)
+
+        weighted_value = msg_attention(query, key, value, mask)
+        return weighted_value
+
+
 class ObsActEncoder(fnn.Module):
     hidden_dim: int
     msg_dim: int
@@ -40,49 +59,45 @@ class ObsActEncoder(fnn.Module):
     @fnn.compact
     def __call__(
         self,
-        observations: Array,
-        communications: Array,
-        neighbor_masks: Array,
+        observations: AgentObservation,
         actions: Array,
     ) -> Array:
         """
         encode observation, communication, action
 
         Args:
-            observations (Array): observations. shape: (batch_size, obs_dim)
-            communications (Array): communications with neighbor agents. shape: (batch_size, num_agents, comm_dim)
-            neighbor_masks (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
+            observations (AgentObservation): NamedTuple for observation of agent. consisting of basic observations and communication
             actions (Array): agent actions. shape: (batch_size, action_dim)
 
         Returns:
             Array: computed hidden state
         """
-        batch_size = observations.shape[0]
-        num_comm_agents = communications.shape[1]
-
-        inputs = jnp.concatenate([observations, actions], axis=-1)
+        inputs = jnp.concatenate([observations.base_observation, actions], axis=-1)
 
         h_obs = fnn.Dense(self.hidden_dim)(inputs)
         h_obs = fnn.relu(h_obs)
-        h_comm = fnn.Dense(self.hidden_dim)(communications)
-        h_comm = fnn.relu(h_comm)
 
-        # communication
-        query = fnn.Dense(self.msg_dim)(h_obs)
-        key = fnn.Dense(self.msg_dim)(h_comm)
-        value = fnn.Dense(self.msg_dim)(h_comm)
-        assert_shape(query, (batch_size, self.msg_dim))
-        assert_shape(key, (batch_size, num_comm_agents, self.msg_dim))
+        # attention agent communication
+        comm_attention_block = AttentionBlock(self.hidden_dim, self.msg_dim)
+        h_comm = comm_attention_block(
+            h_obs, observations.communication, observations.agent_mask
+        )
+        h = jnp.concatenate((h_obs, h_comm), -1)
 
-        # attention
-        h_comm = msg_attention(query, key, value, neighbor_masks)
-        assert_shape(h_comm, (batch_size, self.msg_dim))
+        if observations.item_positions is not None:
+            item_attention_block = AttentionBlock(self.hidden_dim, self.msg_dim)
+            h_item = item_attention_block(
+                h_obs,
+                observations.item_positions,
+                observations.item_mask,
+            )
 
-        h_obs_comm = jnp.concatenate((h_obs, h_comm), -1)
-        h_obs_comm = fnn.Dense(self.hidden_dim)(h_obs_comm)
-        h_obs_comm = fnn.relu(h_obs_comm)
+            h = jnp.concatenate((h, h_item), -1)
 
-        return h_obs_comm
+        h = fnn.Dense(self.hidden_dim)(h)
+        h = fnn.relu(h)
+
+        return h
 
 
 class ObsEncoder(fnn.Module):
@@ -92,42 +107,39 @@ class ObsEncoder(fnn.Module):
     @fnn.compact
     def __call__(
         self,
-        observations: Array,
-        communications: Array,
-        neighbor_masks: Array,
+        observations: AgentObservation,
     ) -> Array:
         """
         encode observation, communication
 
         Args:
-            observations (Array): observations. shape: (batch_size, obs_dim)
-            communications (Array): communications with neighbor agents. shape: (batch_size, num_comm_agents, comm_dim)
-            neighbor_masks (Array): mask for obtaining only neighboring agent communications. shape: (batch_size, num_agents)
+            observations (AgentObservation): NamedTuple for observation of agent. consisting of basic observations and communication
 
         Returns:
             Array: compute hidden state
         """
-        batch_size = observations.shape[0]
-        num_comm_agents = communications.shape[1]
 
-        h_obs = fnn.Dense(self.hidden_dim)(observations)
+        h_obs = fnn.Dense(self.hidden_dim)(observations.base_observation)
         h_obs = fnn.relu(h_obs)
-        h_comm = fnn.Dense(self.hidden_dim)(communications)
-        h_comm = fnn.relu(h_comm)
 
-        # communication
-        query = fnn.Dense(self.msg_dim)(h_obs)
-        key = fnn.Dense(self.msg_dim)(h_comm)
-        value = fnn.Dense(self.msg_dim)(h_comm)
-        assert_shape(query, (batch_size, self.msg_dim))
-        assert_shape(key, (batch_size, num_comm_agents, self.msg_dim))
+        # attention agent communication
+        comm_attention_block = AttentionBlock(self.hidden_dim, self.msg_dim)
+        h_comm = comm_attention_block(
+            h_obs, observations.communication, observations.agent_mask
+        )
+        h = jnp.concatenate((h_obs, h_comm), -1)
 
-        # attention
-        h_comm = msg_attention(query, key, value, neighbor_masks)
-        assert_shape(h_comm, (batch_size, self.msg_dim))
+        if observations.item_positions is not None:
+            item_attention_block = AttentionBlock(self.hidden_dim, self.msg_dim)
+            h_item = item_attention_block(
+                h_obs,
+                observations.item_positions,
+                observations.item_mask,
+            )
+            print(h_item.shape)
+            h = jnp.concatenate((h, h_item), -1)
 
-        h_obs_comm = jnp.concatenate((h_obs, h_comm), -1)
-        h_obs_comm = fnn.Dense(self.hidden_dim)(h_obs_comm)
-        h_obs_comm = fnn.relu(h_obs_comm)
+        h = fnn.Dense(self.hidden_dim)(h)
+        h = fnn.relu(h)
 
-        return h_obs_comm
+        return h

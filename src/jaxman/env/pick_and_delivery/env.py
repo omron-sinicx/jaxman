@@ -1,4 +1,4 @@
-"""Jax-based environment for multi-agent navigation
+"""Jax-based environment for multi-agent pick and delivery problem
 
 Author: Hikaru Asano
 Affiliation: OMRON SINIC X / University of Tokyo
@@ -14,41 +14,34 @@ import matplotlib.pylab as plt
 import numpy as np
 from chex import Array, PRNGKey
 from gym.spaces import Box, Dict, Discrete
-from jaxman.planner.dwa import DWAPlanner
 from omegaconf.dictconfig import DictConfig
 
-from .core import AgentState, TaskInfo, TrialInfo
-from .dynamics import (
-    _build_compute_next_state,
-    _build_observe,
-    _build_step,
-    _get_agent_dist,
-    _get_obstacle_dist,
-)
-from .instance import Instance
-from .viz import render_gif, render_map
+from ..core import AgentState
+from ..pick_and_delivery.instance import Instance
+from ..viz.viz import render_gif, render_map
+from .core import State, TaskInfo, TrialInfo
+from .dynamics import _build_inner_step
+from .observe import _build_observe
 
 
-class JaxMANEnv(gym.Env):
+class JaxPandDEnv(gym.Env):
     def __init__(self, config: DictConfig, seed: int = 0):
         super().__init__()
         self.key = jax.random.PRNGKey(seed)
         self.instance = Instance(config)
         self._env_info, self._agent_info, self._task_info = self.instance.export_info()
         self.num_agents = config.num_agents
+        self.num_items = config.num_items
         self.is_discrete = config.is_discrete
         self.is_diff_drive = config.is_diff_drive
-        self._step = self.build_step(config.is_discrete, config.is_diff_drive)
-        self.planner = self._create_planner()
-        self._observe = _build_observe(
-            self._env_info, self._agent_info, config.is_discrete, self.planner
-        )
+        self._step = _build_inner_step(self._env_info, self._agent_info)
+        self._observe = _build_observe(self._env_info, self._agent_info)
         self.obs = self.reset()
         self._create_spaces(config.is_discrete)
 
     def _create_spaces(self, is_discrete: bool):
         if is_discrete:
-            self.act_space = Discrete(5)
+            self.act_space = Discrete(6)
         else:
             self.act_space = Box(
                 low=np.array([-1.0, -1.0], dtype=np.float32),
@@ -62,28 +55,30 @@ class JaxMANEnv(gym.Env):
             comm_dim = 6  # (rel_pos, rot) * 2
         else:
             comm_dim = 4  # (rel_pos,) * 2
+        item_dim = 4  # (item_pos, item_goal)
 
         obs_dim = (
-            self.obs.cat()[0].shape[0] - comm_dim * self.num_agents - self.num_agents
+            self.obs.cat()[0].shape[0]
+            - comm_dim * self.num_agents
+            - self.num_agents
+            - item_dim * self.num_items
+            - self.num_items
         )
         obs_space = Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
         comm_space = Box(
             low=-1.0, high=1.0, shape=(self.num_agents, comm_dim), dtype=np.float32
         )
         mask_space = Box(low=0.0, high=1.0, shape=(self.num_agents,))
+        item_space = Box(low=0.0, high=1.0, shape=(self.num_items, item_dim))
+        item_mask_space = Box(low=0.0, high=1.0, shape=(self.num_items,))
         self.obs_space = Dict(
-            {"obs": obs_space, "comm": comm_space, "mask": mask_space}
-        )
-
-    def _create_planner(self):
-        _compute_next_state = _build_compute_next_state(
-            self.is_discrete, self.is_diff_drive
-        )
-        return DWAPlanner(
-            compute_next_state=_compute_next_state,
-            get_obstacle_dist=_get_obstacle_dist,
-            get_agent_dist=_get_agent_dist,
-            agent_info=self._agent_info,
+            {
+                "obs": obs_space,
+                "comm": comm_space,
+                "mask": mask_space,
+                "item_pos": item_space,
+                "item_mask": item_mask_space,
+            }
         )
 
     @property
@@ -112,23 +107,26 @@ class JaxMANEnv(gym.Env):
             )
 
         # initialize state
-        self.state = AgentState(
+        agent_state = AgentState(
             pos=self.task_info.starts,
             rot=self.task_info.start_rots,
-            vel=jnp.zeros_like(self.task_info.start_rots),
-            ang=jnp.zeros_like(self.task_info.start_rots),
+            vel=jnp.zeros_like(self.task_info.start_rots, dtype=int),
+            ang=jnp.zeros_like(self.task_info.start_rots, dtype=int),
+        )
+        self.state = State(
+            agent_state,
+            jnp.ones((self.num_agents,), dtype=int) * self.num_items,
+            self.task_info.item_starts,
         )
 
         # initialize trial information
-        self.trial_info = TrialInfo().reset(self._env_info.num_agents)
-        return self._observe(
-            self.state, self.task_info, jnp.ones((self.num_agents,), dtype=bool)
-        )
+        self.trial_info = TrialInfo().reset(self.num_agents, self.num_items)
+        return self._observe(self.state, self.task_info, self.trial_info)
 
-    def render(self, state_traj=None, dones=None, high_quality=True) -> np.Array:
+    def render(self, state_traj=None, dones=None, high_quality=False) -> np.Array:
         return render_map(
             self.state,
-            self.task_info.goals,
+            self.task_info.item_goals,
             self._agent_info.rads,
             self.task_info.obs.occupancy,
             state_traj,
@@ -137,6 +135,7 @@ class JaxMANEnv(gym.Env):
             self.is_discrete,
             self.is_diff_drive,
             high_quality,
+            "pick_and_delivery",
         )
 
     def save_gif(self, state_traj, dones, high_quality=True, filename="result.gif"):
@@ -165,23 +164,21 @@ class JaxMANEnv(gym.Env):
         ani = animation.ArtistAnimation(fig, imgs, interval=600)
         ani.save(filename)
 
-    def state(self) -> Array:
-        return self.state
+    # def state(self) -> Array:
+    #     return self.state
 
     def step(self, actions: dict) -> tuple[dict, dict, dict, dict, dict]:
         """
         Receives all agent actions as an array
         Returns the observation, reward, terminated, truncated and info
         """
-        obs, rew, done, info = self._step(
+        state, rew, done, info = self._step(
             self.state, actions, self.task_info, self.trial_info
         )
-        self.state = obs.state
+        self.state = state
         self.trial_info = info
+        obs = self._observe(state, self.task_info, self.trial_info)
         return obs, rew, done, info
-
-    def build_step(self, is_discrete: bool, is_diff_drive: bool):
-        return _build_step(self._env_info, self._agent_info, is_discrete, is_diff_drive)
 
     def build_reset(self):
         pass

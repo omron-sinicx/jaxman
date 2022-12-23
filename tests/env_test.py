@@ -1,6 +1,6 @@
 import hydra
 import jax.numpy as jnp
-from jaxman.env.env import JaxMANEnv
+from jaxman.env.navigation.env import JaxMANEnv
 from omegaconf import OmegaConf
 
 
