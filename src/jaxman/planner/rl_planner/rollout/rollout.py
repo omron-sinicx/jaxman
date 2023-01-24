@@ -15,6 +15,7 @@ def _build_rollout_episode(
     instance: Instance,
     actor_fn: Callable,
     evaluate: bool,
+    model_name: str,
 ) -> Callable:
     """build rollout episode function
 
@@ -27,6 +28,6 @@ def _build_rollout_episode(
         Callable: jit-compiled rollout episode function
     """
     if instance.env_name == "navigation":
-        return build_navi_rollout(instance, actor_fn, evaluate)
+        return build_navi_rollout(instance, actor_fn, evaluate, model_name)
     else:
-        return build_p_and_d_rollout(instance, actor_fn, evaluate)
+        return build_p_and_d_rollout(instance, actor_fn, evaluate, model_name)

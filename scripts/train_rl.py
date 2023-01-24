@@ -9,8 +9,8 @@ from jaxman.env.navigation.env import JaxMANEnv
 
 # from jaxman.env.navigation.env import JaxMANEnv
 from jaxman.env.pick_and_delivery.env import JaxPandDEnv
-from jaxman.planner.rl_planner.agent.dqn.dqn import create_dqn_agent
-from jaxman.planner.rl_planner.agent.sac.sac import create_sac_agent, restore_sac_actor
+from jaxman.planner.rl_planner.agent.core import create_agent
+from jaxman.planner.rl_planner.agent.sac.sac import restore_sac_actor
 from jaxman.planner.rl_planner.logger import LogResult
 from jaxman.planner.rl_planner.worker import (
     Evaluator,
@@ -45,10 +45,10 @@ def main(config):
             env = JaxPandDEnv(config.env, config.seed)
         observation_space = env.observation_space
         action_space = env.action_space
-        buffer = GlobalBuffer.remote(observation_space, action_space, config.train)
+        buffer = GlobalBuffer.remote(observation_space, action_space, config)
 
         key = jax.random.PRNGKey(config.seed)
-        sac, key = create_dqn_agent(
+        agent, key = create_agent(
             observation_space,
             action_space,
             config.model,
@@ -56,12 +56,12 @@ def main(config):
         )
         if config.train.use_pretrained_model:
             actor = restore_sac_actor(
-                sac.actor,
+                agent.actor,
                 config.env.is_discrete,
                 config.env.is_diff_drive,
                 f"../../../../../model/{config.env.env_name}",
             )
-            sac = sac._replace(actor=actor)
+            agent = agent._replace(actor=actor)
 
         action_scale = None
         action_bias = None
@@ -74,7 +74,7 @@ def main(config):
         # target_entropy = -action_space.n/2
         learner = Learner.remote(
             buffer,
-            sac,
+            agent,
             action_scale,
             action_bias,
             target_entropy,
@@ -84,21 +84,21 @@ def main(config):
         rollout_worker = RolloutWorker.remote(
             buffer,
             learner,
-            sac.actor,
+            agent.actor,
             env.instance,
             config.seed,
         )
         rollout_worker.run.remote()
         evaluator = Evaluator.remote(
             learner,
-            sac.actor,
+            agent.actor,
             env.instance,
             config.seed,
         )
         evaluator.run.remote()
 
         data_num = 0
-        while data_num < config.train.batch_size:
+        while data_num < 10000:
             time.sleep(1)
             data_num = ray.get(ray.get(buffer.num_data.remote()))
 
@@ -128,9 +128,9 @@ def main(config):
         evaluator.evaluate.remote(config.train.eval_iters)
         done = False
 
-        while not done:
-            done = ray.get(evaluator.is_eval_done.remote())
-            time.sleep(0.5)
+        # while not done:
+        #     done = ray.get(evaluator.is_eval_done.remote())
+        #     time.sleep(0.5)
 
         ray.kill(rollout_worker)
         ray.kill(evaluator)

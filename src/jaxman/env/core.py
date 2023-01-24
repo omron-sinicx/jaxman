@@ -29,11 +29,13 @@ class EnvInfo(NamedTuple):
     scan_range: float
     use_intentions: bool
     timeout: int
+    is_crash: bool
     goal_reward: float
     dist_reward: float
     dont_hold_item_penalty: float
     crash_penalty: float
     time_penalty: float
+    pickup_reward: float
     is_discrete: bool
     is_diff_drive: bool
 

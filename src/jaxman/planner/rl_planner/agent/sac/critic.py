@@ -25,7 +25,6 @@ from ..model.continuous_model import DoubleCritic as ContinuousCritic
 from ..model.discrete_model import DoubleCritic as DiscreteCritic
 
 tfd = tfp.distributions
-tfb = tfp.bijectors
 
 
 def create_critic(
@@ -66,7 +65,9 @@ def create_critic(
         )["params"]
     else:
         action_dim = action_space.n
-        critic_fn = DiscreteCritic(config.hidden_dim, config.msg_dim, action_dim)
+        critic_fn = DiscreteCritic(
+            config.hidden_dim, config.msg_dim, action_dim, config.use_dueling_net
+        )
         params = critic_fn.init(
             key,
             dummy_observations,

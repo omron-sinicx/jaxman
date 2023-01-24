@@ -1,9 +1,10 @@
 name: sac
 hidden_dim: 256
 msg_dim: 32
+use_dueling_net: False
 # model optimization
-actor_lr: 0.0001
-critic_lr: 0.0001
-temp_lr: 0.0001
-decay_steps: 10e6
+actor_lr: 0.001
+critic_lr: 0.001
+temp_lr: 0.001
+decay_steps: 1000000
 decay_alpha: 0.05

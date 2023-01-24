@@ -26,7 +26,6 @@ def _build_observe(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
     Args:
         env_info (EnvInfo): environment base information
         agent_info (AgentInfo): agent kinematics information
-        planner (DWAPlanner): DWA Planner
 
     Returns:
         Callable: jit-compiled observe function
@@ -40,7 +39,19 @@ def _build_observe(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
     _compute_relative_pos = _build_compute_relative_positions(env_info)
     _compute_item_goals = _build_compute_item_goals(env_info)
 
-    def _observe(state: State, task_info: TaskInfo, trial_info: TrialInfo):
+    def _observe(
+        state: State, task_info: TaskInfo, trial_info: TrialInfo
+    ) -> AgentObservation:
+        """observe
+
+        Args:
+            state (State): current agent and item state
+            task_info (TaskInfo): task information
+            trial_info (TrialInfo): trial information
+
+        Returns:
+            AgentObservation: observation
+        """
         if is_discrete:
             obs_pos = _get_obs_pos(state, task_info.obs.occupancy)
         else:
@@ -98,6 +109,7 @@ def _build_compute_item_goals(env_info):
 
         Args:
             load_item_id (Array): ID of the item being carried by the agent.
+            item_goals (Array): all item goal positions
 
         Returns:
             Array: item goals
@@ -166,41 +178,3 @@ def _build_compute_neighbor_item_mask(
         return jax.jit(_compute_discrete_neighbor_mask)
     else:
         return jax.jit(_compute_continuous_neighbor_mask)
-
-
-# def _build_get_obs_agent_item_map(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
-#     def _build_get_discrete_obs_agent_item_map(env_info: EnvInfo):
-#         fov_r = env_info.fov_r
-#         num_agents = env_info.num_agents
-#         _extract_fov = _build_extract_fov(env_info)
-#         _add_agent_pos_to_obstacle_map = _build_add_agent_pos_to_obstacle_map(env_info)
-
-#         def _get_obs_and_agent_pos(state: State, obs_map: Array) -> Array:
-#             """
-#             get flatten neighboring obstacles and agent position
-
-#             Args:
-#                 state (AgentState): agent's current state
-#                 obs_map (Array): obstacle map. obs_map is added One padding
-
-#             Returns:
-#                 Array: flatten obs and agent position
-#             """
-#             obs_map = jnp.pad(obs_map, fov_r, mode="constant", constant_values=0)
-#             agent_item_pos = jnp.vstack((state.agent_state.pos, state.item_pos))
-#             obs_agent_map = _add_agent_pos_to_obstacle_map(agent_item_pos, obs_map)
-#             fov = jax.vmap(_extract_fov, in_axes=(0, None))(
-#                 state.agent_state, obs_agent_map
-#             )
-#             flatten_fov = fov.reshape(num_agents, -1)
-#             return flatten_fov
-
-#         return jax.jit(_get_obs_and_agent_pos)
-
-#     def _build_get_continuous_obs_agent_item_map(env_info: EnvInfo):
-#         pass
-
-#     if env_info.is_discrete:
-#         return _build_get_discrete_obs_agent_item_map(env_info)
-#     else:
-#         return _build_get_continuous_obs_agent_item_map(env_info)

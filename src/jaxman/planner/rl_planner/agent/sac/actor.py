@@ -25,7 +25,6 @@ from ..model.continuous_model import Actor as ContinuousActor
 from ..model.discrete_model import Actor as DiscreteActor
 
 tfd = tfp.distributions
-tfb = tfp.bijectors
 
 
 def create_actor(

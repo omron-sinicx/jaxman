@@ -1,69 +1,39 @@
+import hydra
+import jax
 import jax.numpy as jnp
-from jaxman.env.core import AgentInfo, AgentState, EnvInfo, ObstacleMap
-from jaxman.env.pick_and_delivery.core import State, TaskInfo, TrialInfo
-from jaxman.env.pick_and_delivery.dynamics import _build_inner_step
-from jaxman.env.viz.viz import render_env
+import matplotlib.pyplot as plt
+from jaxman.env.pick_and_delivery.core import AgentState, State, TaskInfo, TrialInfo
+from jaxman.env.pick_and_delivery.env import JaxPandDEnv
+from jaxman.utils import compute_agent_action
+from omegaconf import OmegaConf
 
-obs = ObstacleMap(jnp.zeros((10, 10)), None, None, None)
-env_info = EnvInfo(
-    num_agents=2,
-    occupancy_map=jnp.zeros((10, 10)),
-    sdf_map=None,
-    edges=None,
-    num_items=2,
-    fov_r=3,
-    comm_r=3,
-    num_scans=None,
-    scan_range=None,
-    use_intentions=True,
-    timeout=100,
-    goal_reward=+1,
-    crash_penalty=-1,
-    time_penalty=0,
-    is_discrete=True,
-    is_diff_drive=False,
+config = hydra.utils.instantiate(
+    OmegaConf.load("scripts/config/env/pick_and_delivery/grid.yaml")
 )
-zero = jnp.array([[0], [0]])
-agent_info = AgentInfo(
-    max_vels=zero,
-    min_vels=zero,
-    max_ang_vels=zero,
-    min_ang_vels=zero,
-    max_accs=zero,
-    max_ang_accs=zero,
-    rads=zero,
-)
-trial_info = TrialInfo.reset(env_info.num_agents, env_info.num_items)
-task_info = TaskInfo(
-    starts=jnp.array([[3, 3], [6, 6]]),
-    start_rots=jnp.array([[0], [0]]),
-    item_starts=jnp.array([[3, 6], [6, 3]]),
-    item_goals=jnp.array([[7, 4], [4, 7]]),
-    obs=obs,
-)
-agent_state = AgentState(
-    pos=task_info.starts,
-    rot=task_info.start_rots,
-    vel=jnp.array([[0], [0]]),
-    ang=jnp.array([[0], [0]]),
-)
-state = State(
-    agent_state,
-    load_item_id=jnp.ones((env_info.num_agents), dtype=int) * env_info.num_items,
-    item_pos=task_info.item_starts,
-)
-done = jnp.array([False] * env_info.num_agents)
+config.level = 0
+config.map_size = 10
+config.num_agents = 1
+config.num_items = 4
+config.dist_reward = 0
+env = JaxPandDEnv(config)
+# plt.imshow(env.render())
+key = jax.random.PRNGKey(0)
 
-_step = _build_inner_step(env_info, agent_info)
+key, subkey = jax.random.split(key)
+obs = env.reset(subkey)
 
-render_env(
-    state,
-    task_info.item_goals,
-    env_info.occupancy_map,
-    trial_info,
-    done,
-    task_type="pick_and_delivery",
+is_item_loaded = jnp.expand_dims(jnp.arange(env.num_items) < env.num_agents, -1)
+item_starts = (env.task_info.item_starts + is_item_loaded * 10000).astype(int)
+env.state = env.state._replace(
+    load_item_id=jnp.arange(env.num_agents), item_pos=item_starts
 )
+fig, axes = plt.subplots(1, 10, figsize=(21, 3))
+for i in range(10):
+    key, subkey = jax.random.split(key)
+    actions = jax.random.choice(subkey, 6, (config.num_agents,))
+    # actions = compute_agent_action(["RIGHT","LEFT"])
+    obs, rew, done, trial_info = env.step(actions)
+    print(f"rew:{rew}, act:{actions}, done:{done}")
+    axes[i].imshow(env.render())
 
-actions = jnp.array([2, 0])
-state, rew, done, info = _step(state, actions, task_info, trial_info)
+# _observe(state, task_info, trial_info)

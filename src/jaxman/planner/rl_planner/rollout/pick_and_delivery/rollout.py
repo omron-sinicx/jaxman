@@ -15,7 +15,7 @@ from jaxman.env.pick_and_delivery.core import State, TaskInfo, TrialInfo
 from jaxman.env.pick_and_delivery.instance import Instance
 from jaxman.env.pick_and_delivery.observe import _build_observe
 from jaxman.env.task_generator import sample_valid_agent_item_pos
-from jaxman.planner.rl_planner.agent.sample_action import build_sample_agent_action
+from jaxman.planner.rl_planner.agent.core import build_sample_agent_action
 from jaxman.planner.rl_planner.memory.dataset import Experience
 
 from .dynamics import _build_compute_agent_intention, _build_rollout_step
@@ -118,6 +118,7 @@ def build_rollout_episode(
     instance: Instance,
     actor_fn: Callable,
     evaluate: bool,
+    model_name: str,
 ) -> Callable:
     """build rollout episode function
 
@@ -135,23 +136,11 @@ def build_rollout_episode(
         agent_info,
         actor_fn,
     )
-    # pick and delivery env don't use planner
-    # if instance.is_discrete:
-    #     planner = None
-    # else:
-    #     compute_next_state = _build_compute_next_state(
-    #         instance.is_discrete, instance.is_diff_drive
-    #     )
-    #     planner = DWAPlanner(
-    #         compute_next_state=compute_next_state,
-    #         get_obstacle_dist=_get_obstacle_dist,
-    #         get_agent_dist=_get_agent_dist,
-    #         agent_info=agent_info,
-    #     )
+
     _observe = _build_observe(env_info, agent_info)
     _compute_intentions = _build_compute_agent_intention(env_info, agent_info, actor_fn)
     _sample_actions = build_sample_agent_action(
-        actor_fn, instance.is_discrete, evaluate
+        actor_fn, instance.is_discrete, evaluate, model_name
     )
 
     def _rollout_episode(

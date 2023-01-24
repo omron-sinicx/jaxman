@@ -1,4 +1,10 @@
-from typing import NamedTuple, Tuple
+"""Functions of dynamics for Pick and Delivery Env
+
+Author: Hikaru Asano
+Affiliation: OMRON SINIC X / University of Tokyo
+"""
+
+from typing import Callable, NamedTuple, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -12,13 +18,24 @@ from ..kinematic_dynamics import (
     _build_compute_next_state,
 )
 from ..obstacle import ObstacleMap
-from .core import AgentObservation, State, TaskInfo, TrialInfo
+from .core import State, TaskInfo, TrialInfo
 
 INF = 10000
 
 
-def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
+def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
+    """build step function
+
+    Args:
+        env_info (EnvInfo): environment base information
+        agent_info (AgentInfo): agent kinematics information
+
+    Returns:
+        Callable: jit-compiled observe function
+    """
     is_discrete = env_info.is_discrete
+    num_agents = env_info.num_agents
+    is_crash = env_info.is_crash
     _compute_next_state = _build_compute_next_env_state(env_info, agent_info)
     _check_collision_wiht_agents = _build_check_collision_with_agents(
         env_info, agent_info, is_discrete
@@ -33,7 +50,18 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
 
     def _inner_step(
         state: State, actions: Array, task_info: TaskInfo, trial_info: TrialInfo
-    ) -> Tuple[AgentObservation, Array, Array, TrialInfo]:
+    ) -> Tuple[State, Array, Array, TrialInfo]:
+        """inner step function
+
+        Args:
+            state (State): current agent and item state
+            actions (Array): actions
+            task_info (TaskInfo): task information
+            trial_info (TrialInfo): trial information
+
+        Returns:
+            Tuple[State, Array, Array, TrialInfo]: next_state, rewards, dones, new trial information
+        """
 
         # update state
         movable_agents = jnp.logical_not(trial_info.agent_collided)
@@ -63,8 +91,8 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
         rews, done, new_trial_info = _compute_rew_done_info(
             state,
             possible_next_state,
-            agent_collided,
-            item_collided,
+            agent_collided * is_crash,
+            item_collided * is_crash,
             solved,
             task_info,
             trial_info,
@@ -76,8 +104,17 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
         ang = possible_next_state.agent_state.ang * not_finished_agents
         new_agent_state = possible_next_state.agent_state._replace(vel=vel, ang=ang)
 
+        if not is_crash:
+            new_agent_state = AgentState.from_array(
+                (
+                    state.agent_state.cat() * agent_collided.reshape(num_agents, -1)
+                    + new_agent_state.cat()
+                    * jnp.logical_not(agent_collided).reshape(num_agents, -1)
+                ).astype(int)
+            )
+
         # if item finish episode, set item position to INF
-        done_item = jnp.logical_or(item_collided, solved)
+        done_item = jnp.logical_or(item_collided * is_crash, solved)
         item_pos = jax.vmap(lambda pos, done: pos + done * INF)(
             possible_next_state.item_pos, done_item
         )
@@ -91,7 +128,16 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
     return jax.jit(_inner_step)
 
 
-def _build_compute_next_env_state(env_info: EnvInfo, agent_info: AgentInfo):
+def _build_compute_next_env_state(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
+    """build function to compute next environment state
+
+    Args:
+        env_info (EnvInfo): environment base information
+        agent_info (AgentInfo): agent kinematics information
+
+    Returns:
+        Callable: jit-compiled function to compute next state
+    """
     _compute_agent_next_state = _build_compute_next_agent_state(env_info)
     _compute_next_item_state = _build_compute_next_item_state(env_info, agent_info)
 
@@ -398,14 +444,25 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
 
             # dont hold item penalty
             load_item_id = state.load_item_id[agent_index]
-            is_load_item = load_item_id < num_items
+            is_load_item_new = load_item_id < num_items
             dont_hold_item_penalty = (
-                jnp.logical_not(is_load_item) * env_info.dont_hold_item_penalty
+                jnp.logical_not(is_load_item_new) * env_info.dont_hold_item_penalty
+            )
+
+            # reward ofr pick up item
+            pickup_reward = (
+                is_load_item_new
+                * jnp.logical_not(is_load_item)
+                * env_info.pickup_reward
             )
 
             not_finished = jnp.logical_not(old_trial_info.agent_collided[agent_index])
             return (
-                solve_rew + dist_rew + crash_penalty + dont_hold_item_penalty
+                solve_rew
+                + dist_rew
+                + crash_penalty
+                + dont_hold_item_penalty
+                + pickup_reward
             ) * not_finished
 
         agent_collided = jnp.logical_or(agent_collided, trial_info.agent_collided)

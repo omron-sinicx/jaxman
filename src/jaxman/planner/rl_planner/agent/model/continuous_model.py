@@ -11,13 +11,9 @@ import jax.numpy as jnp
 from chex import Array
 from flax import linen as fnn
 from jaxman.planner.rl_planner.core import AgentObservation
-from tensorflow_probability.substrates import jax as tfp
-from tensorflow_probability.substrates.jax.distributions import Distribution
 
 from .base_model import ObsActEncoder, ObsEncoder
 
-tfd = tfp.distributions
-tfb = tfp.bijectors
 LOG_STD_MIN = -20.0
 LOG_STD_MAX = 2.0
 
@@ -99,7 +95,7 @@ class Actor(fnn.Module):
     @fnn.compact
     def __call__(self, observations: AgentObservation) -> Tuple[Array, Array]:
         """
-        calculate agent action distribution
+        calculate agent action mean and log_std
 
         Args:
             observations (AgentObservation): NamedTuple for observation of agent. consisting of basic observations and communication
@@ -135,6 +131,4 @@ class Actor(fnn.Module):
         log_std_max = self.log_std_max or LOG_STD_MAX
         log_stds = jnp.clip(log_stds, log_std_min, log_std_max)
 
-        # base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=jnp.exp(log_stds))
         return means, log_stds
-        # return base_dist

@@ -35,11 +35,13 @@ class Instance:
     num_scans: int
     scan_range: float
     timeout: int
+    is_crash: bool
     goal_reward: float
     dist_reward: float
     dont_hold_item_penalty: float
     crash_penalty: float
     time_penalty: float
+    pickup_reward: float
     agent_starts: Array
     agent_start_rots: Array
     item_starts: Array
@@ -73,11 +75,13 @@ class Instance:
         self.scan_range = config.scan_range
         self.use_intentions = config.use_intentions
         self.timeout = config.timeout
+        self.is_crash = config.is_crash
         self.goal_reward = config.goal_reward
         self.dist_reward = config.dist_reward
         self.dont_hold_item_penalty = config.dont_hold_item_penalty
         self.crash_penalty = config.crash_penalty
         self.time_penalty = config.time_penalty
+        self.pickup_reward = config.pickup_reward
 
         self.is_discrete = config.is_discrete
         self.is_diff_drive = config.is_diff_drive
@@ -135,11 +139,13 @@ class Instance:
             scan_range=float(self.scan_range),
             use_intentions=bool(self.use_intentions),
             timeout=int(self.timeout),
+            is_crash=bool(self.is_crash),
             goal_reward=self.goal_reward,
             dist_reward=self.dist_reward,
             dont_hold_item_penalty=self.dont_hold_item_penalty,
             crash_penalty=self.crash_penalty,
             time_penalty=self.time_penalty,
+            pickup_reward=self.pickup_reward,
             is_discrete=self.is_discrete,
             is_diff_drive=self.is_diff_drive,
         )

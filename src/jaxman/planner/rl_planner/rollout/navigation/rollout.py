@@ -15,7 +15,7 @@ from jaxman.env.navigation.instance import Instance
 from jaxman.env.navigation.observe import _build_observe
 from jaxman.env.obstacle import ObstacleMap
 from jaxman.env.task_generator import sample_valid_start_goal
-from jaxman.planner.rl_planner.agent.sample_action import build_sample_agent_action
+from jaxman.planner.rl_planner.agent.core import build_sample_agent_action
 from jaxman.planner.rl_planner.memory.dataset import Experience
 
 from .dynamics import _build_compute_agent_intention, _build_rollout_step
@@ -97,6 +97,7 @@ def build_rollout_episode(
     instance: Instance,
     actor_fn: Callable,
     evaluate: bool,
+    model_name: str,
 ) -> Callable:
     """build rollout episode function
 
@@ -118,7 +119,7 @@ def build_rollout_episode(
     _observe = _build_observe(env_info, agent_info)
     _compute_intentions = _build_compute_agent_intention(env_info, agent_info, actor_fn)
     _sample_actions = build_sample_agent_action(
-        actor_fn, instance.is_discrete, evaluate
+        actor_fn, instance.is_discrete, evaluate, model_name
     )
 
     def _rollout_episode(

@@ -31,6 +31,7 @@ class Evaluator:
         learner: Learner,
         actor: TrainState,
         instance: Instance,
+        model_name: str,
         seed: int = 0,
     ) -> None:
         """
@@ -40,12 +41,14 @@ class Evaluator:
             learner (Learner): learner. update agent parameters
             actor (TrainState): actor
             instance (Instance): envrironment instance
+            model_name (str): agent model name (sac or dqn)
             seed (int, optional): seed. Defaults to 0
         """
         self.learner = learner
         self.actor = actor
         self.instance = instance
         self.env_name = instance.env_name
+        self.model_name = model_name
 
         self.seed = seed
 
@@ -56,7 +59,7 @@ class Evaluator:
         self.animation = None
         self.done = False
         self._rollout_fn = _build_rollout_episode(
-            instance, actor.apply_fn, evaluate=True
+            instance, actor.apply_fn, evaluate=True, model_name=model_name
         )
 
     def run(self) -> None:

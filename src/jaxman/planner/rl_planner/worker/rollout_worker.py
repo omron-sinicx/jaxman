@@ -28,22 +28,25 @@ class RolloutWorker:
         learner: Learner,
         actor: TrainState,
         instance: Instance,
+        model_name: str,
         seed: int = 0,
     ) -> None:
         """
-        Actor. collect agent rollout data
+        Rollout worker. rollout episodes for collecting training data
 
         Args:
             global_buffer (GlobalBuffer): global buffer
             learner (Learner): learner. update agent parameters
             actor (TrainState): actor
             instance (Instance): envrironment instance
+            model_name (str): agent model name (sac or dqn)
             seed (int, optional): seed. Defaults to 0
         """
         self.global_buffer = global_buffer
         self.learner = learner
         self.actor = actor
         self.instance = instance
+        self.model_name = model_name
 
         self.seed = seed
 
@@ -52,7 +55,7 @@ class RolloutWorker:
         self.last_counter = 0
 
         self._rollout_fn = _build_rollout_episode(
-            instance, actor.apply_fn, evaluate=False
+            instance, actor.apply_fn, evaluate=False, model_name=model_name
         )
 
     def run(self) -> None:

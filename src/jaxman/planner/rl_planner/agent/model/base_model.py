@@ -1,4 +1,4 @@
-"""Definition of basic model structure for SAC Agent
+"""Definition of basic model structure for RL agent
 
 Author: Hikaru Asano
 Affiliation: OMRON SINIC X / University of Tokyo
@@ -40,7 +40,17 @@ class AttentionBlock(fnn.Module):
     msg_dim: int
 
     @fnn.compact
-    def __call__(self, h_obs, comm, mask):
+    def __call__(self, h_obs: Array, comm: Array, mask: Array) -> Array:
+        """encode and apply attnetion for communication
+
+        Args:
+            h_obs (Array): encoded base observation
+            comm (Array): communication
+            mask (Array): communication mask for neighborhood information
+
+        Returns:
+            Array: encoded and attentioned communication
+        """
         h_comm = fnn.Dense(self.hidden_dim)(comm)
         h_comm = fnn.relu(h_comm)
 
@@ -49,7 +59,9 @@ class AttentionBlock(fnn.Module):
         value = fnn.Dense(self.msg_dim)(h_comm)
 
         weighted_value = msg_attention(query, key, value, mask)
-        return weighted_value
+        h_value = fnn.Dense(self.hidden_dim)(weighted_value)
+        h_value = fnn.relu(h_value)
+        return h_value
 
 
 class ObsActEncoder(fnn.Module):
@@ -63,14 +75,14 @@ class ObsActEncoder(fnn.Module):
         actions: Array,
     ) -> Array:
         """
-        encode observation, communication, action
+        encode observation, communication and action
 
         Args:
             observations (AgentObservation): NamedTuple for observation of agent. consisting of basic observations and communication
             actions (Array): agent actions. shape: (batch_size, action_dim)
 
         Returns:
-            Array: computed hidden state
+            Array: hidden state
         """
         inputs = jnp.concatenate([observations.base_observation, actions], axis=-1)
 
@@ -83,11 +95,13 @@ class ObsActEncoder(fnn.Module):
             h_obs, observations.communication, observations.agent_mask
         )
         h = jnp.concatenate((h_obs, h_comm), -1)
+        h = fnn.Dense(self.hidden_dim)(h)
+        h = fnn.relu(h)
 
         if observations.item_positions is not None:
             item_attention_block = AttentionBlock(self.hidden_dim, self.msg_dim)
             h_item = item_attention_block(
-                h_obs,
+                h,
                 observations.item_positions,
                 observations.item_mask,
             )
@@ -110,13 +124,13 @@ class ObsEncoder(fnn.Module):
         observations: AgentObservation,
     ) -> Array:
         """
-        encode observation, communication
+        encode observation and communication
 
         Args:
             observations (AgentObservation): NamedTuple for observation of agent. consisting of basic observations and communication
 
         Returns:
-            Array: compute hidden state
+            Array: hidden state
         """
 
         h_obs = fnn.Dense(self.hidden_dim)(observations.base_observation)
@@ -136,7 +150,6 @@ class ObsEncoder(fnn.Module):
                 observations.item_positions,
                 observations.item_mask,
             )
-            print(h_item.shape)
             h = jnp.concatenate((h, h_item), -1)
 
         h = fnn.Dense(self.hidden_dim)(h)

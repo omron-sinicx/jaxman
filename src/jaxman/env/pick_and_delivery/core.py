@@ -1,16 +1,17 @@
-"""Data structures for JaxMANEnv
+"""Data structures for Pick and Delivery Environment
 
 Author: Hikaru Asano
 Affiliation: OMRON SINIC X / University of Tokyo
 """
 from __future__ import annotations
 
-from typing import NamedTuple, Optional, Tuple
+from typing import NamedTuple, Tuple
 
 import chex
 import jax.numpy as jnp
 import numpy as np
 from chex import Array
+from jaxman.planner.rl_planner.core import AgentObservation as ModelInput
 
 from ..core import AgentState
 from ..obstacle import ObstacleMap
@@ -24,7 +25,6 @@ class TrialInfo(NamedTuple):
     item_collided: Array = None
     solved: Array = None
     solved_time: Array = None
-    # solved_time: Array = None
     timeout: Array = None
     delivery_rate: Array = None
     agent_crash_rate: Array = None
@@ -32,7 +32,6 @@ class TrialInfo(NamedTuple):
     sum_of_cost: Array = None
     makespan: Array = None
     is_success: Array = None
-    # is_success: Array = jnp.array(0).astype(bool)
 
     @classmethod
     def reset(self, num_agents: int, num_items: int):
@@ -161,11 +160,11 @@ class AgentObservation(NamedTuple):
             ret = np.array(ret)
         return ret
 
-    def split_observation(self) -> Tuple[Array, Array, Array]:
+    def split_observation(self) -> ModelInput:
         """split agent observation into base_observation, communication, communication mask, item information, item mask
 
         Returns:
-            Tuple[Array, Array, Array]: base_observation, communication, communication_mask
+            ModelInput: formatted observation for flax model
         """
         ret_state = self.agent_state.cat()
         obs = jnp.hstack(
@@ -182,7 +181,7 @@ class AgentObservation(NamedTuple):
         item_pos = self.item_info
         item_mask = self.item_masks
 
-        return obs, comm, mask, item_pos, item_mask
+        return ModelInput(obs, comm, mask, item_pos, item_mask, self.is_hold_item)
 
     def is_valid(self) -> None:
         # (n_agents, 2)

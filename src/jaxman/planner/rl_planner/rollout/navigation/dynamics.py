@@ -55,8 +55,10 @@ def _build_compute_agent_intention(
             Array: intentions
         """
         state = observations.state
-        obss, _, _, _, _ = observations.split_observation()
-        dummy_observation = ModelInput(obss, dummy_comm, dummy_mask)
+        observations = observations.split_observation()
+        dummy_observation = observations._replace(
+            communication=dummy_comm, agent_mask=dummy_mask
+        )
         q_value = actor_fn({"params": actor_params}, dummy_observation)
         if is_discrete:
             actions = jnp.argmax(q_value, axis=-1)

@@ -15,3 +15,4 @@ class AgentObservation(NamedTuple):
     agent_mask: Array
     item_positions: Array = None
     item_mask: Array = None
+    is_hold_item: bool = None
