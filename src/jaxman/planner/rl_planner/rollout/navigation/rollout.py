@@ -105,6 +105,7 @@ def build_rollout_episode(
         instance (Instance): problem instance
         actor_fn (Callable): actor function
         evaluate (bool): whether agent explorate or evaluate
+        model_name (str): agent model name (sac or dqn)
 
     Returns:
         Callable: jit-compiled rollout episode function
@@ -142,7 +143,13 @@ def build_rollout_episode(
 
         def _act_and_step(carry: Carry):
             not_finished_agent = ~carry.dones
-            key, actions = _sample_actions(actor_params, carry.observations, carry.key)
+            if random_action and env_info.is_discrete:
+                key, subkey = jax.random.split(carry.key)
+                actions = jax.random.choice(subkey, 6, (env_info.num_agents,))
+            else:
+                key, actions = _sample_actions(
+                    actor_params, carry.observations, carry.key
+                )
             actions = jax.vmap(lambda action, mask: action * mask)(
                 actions, not_finished_agent
             )
@@ -174,4 +181,4 @@ def build_rollout_episode(
         carry = jax.lax.while_loop(cond, _act_and_step, carry)
         return carry
 
-    return jax.jit(_rollout_episode)
+    return jax.jit(_rollout_episode, static_argnames={"random_action"})

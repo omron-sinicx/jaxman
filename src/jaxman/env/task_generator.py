@@ -10,7 +10,6 @@ import numpy as np
 from chex import Array, PRNGKey
 from CMap2D import CMap2D
 
-from .core import AgentState
 from .obstacle import ObstacleMap, ObstacleSphere, contours_to_edges, cross_road, room
 from .sampler import sample_random_agent_item_pos, sample_random_pos, sample_start_rots
 
@@ -41,6 +40,7 @@ def sample_valid_start_goal(
         is_discrete (bool): whether environment action space is discrete or not
         is_diff_drive (bool): whether environment is diff drive env or not
         no_overlap (bool, optional): whether or not to allow each vertices to be overlapped within agent radius. Defaults to False.
+        sample_type (str, optional): sampling distribution type
         num_max_trials (int, optional): maximum number of resampling. Defaults to 100.
 
     Returns:
@@ -96,6 +96,7 @@ def sample_valid_agent_item_pos(
         is_discrete (bool): whether environment action space is discrete or not
         is_diff_drive (bool): whether environment is diff drive env or not
         no_overlap (bool, optional): whether or not to allow each vertices to be overlapped within agent radius. Defaults to False.
+        sample_type (str, optional): sampling distribution type
         num_max_trials (int, optional): maximum number of resampling. Defaults to 100.
 
     Returns:
@@ -176,7 +177,7 @@ def generate_random_occupancy_map(
     obs_size_lower_bound: float = 0.05,
     obs_size_upper_bound: float = 0.08,
     key: PRNGKey = jax.random.PRNGKey(46),
-) -> Array:
+) -> np.array:
     """generate obstacle occupancy map
 
     Args:
@@ -188,7 +189,7 @@ def generate_random_occupancy_map(
         key (PRNGKey, optional): _description_. Defaults to jax.random.PRNGKey(46).
 
     Returns:
-        Array: _description_
+        np.array: occupancy map
     """
     if is_discrete:
         occupancy = np.zeros((map_size, map_size))

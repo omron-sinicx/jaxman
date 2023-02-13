@@ -164,9 +164,6 @@ class JaxPandDEnv(gym.Env):
         ani = animation.ArtistAnimation(fig, imgs, interval=600)
         ani.save(filename)
 
-    # def state(self) -> Array:
-    #     return self.state
-
     def step(self, actions: dict) -> tuple[dict, dict, dict, dict, dict]:
         """
         Receives all agent actions as an array
@@ -179,6 +176,3 @@ class JaxPandDEnv(gym.Env):
         self.trial_info = info
         obs = self._observe(state, self.task_info, self.trial_info)
         return obs, rew, done, info
-
-    def build_reset(self):
-        pass

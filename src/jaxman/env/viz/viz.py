@@ -38,14 +38,13 @@ def render_map(
             task_type,
         )
     else:
-        pass
-        # starts = state.pos
-        # if high_quality:
-        #     img = render_continuous_map(starts, goals, rads, occupancy, state_traj)
-        # else:
-        #     img = render_simple_continuous_map(
-        #         starts, goals, rads, occupancy, state_traj
-        #     )
+        starts = state.pos
+        if high_resolution:
+            img = render_continuous_map(starts, goals, rads, occupancy, state_traj)
+        else:
+            img = render_simple_continuous_map(
+                starts, goals, rads, occupancy, state_traj
+            )
     return img
 
 

@@ -170,7 +170,7 @@ def update(
         return critic_loss.mean()
 
     def continuous_loss_fn(params: FrozenDict) -> Array:
-        batch_size = batch.observations.shape[0]
+        batch_size = batch.observations.base_observation.shape[0]
 
         means, log_stds = actor.apply_fn(
             {"params": actor.params},

@@ -19,9 +19,8 @@ from .core import TaskInfo
 
 # @dataclass
 class Instance:
-    """Environment instance of multi-agent navigation"""
+    """Environment instance of multi-agent pick and delivery"""
 
-    # some values have None as a default value to ensure backward compatibility
     env_name: str
     num_agents: int
     num_items: int
@@ -35,7 +34,7 @@ class Instance:
     num_scans: int
     scan_range: float
     timeout: int
-    is_crash: bool
+    is_crashable: bool
     goal_reward: float
     dist_reward: float
     dont_hold_item_penalty: float
@@ -75,7 +74,7 @@ class Instance:
         self.scan_range = config.scan_range
         self.use_intentions = config.use_intentions
         self.timeout = config.timeout
-        self.is_crash = config.is_crash
+        self.is_crashable = config.is_crashable
         self.goal_reward = config.goal_reward
         self.dist_reward = config.dist_reward
         self.dont_hold_item_penalty = config.dont_hold_item_penalty
@@ -139,7 +138,7 @@ class Instance:
             scan_range=float(self.scan_range),
             use_intentions=bool(self.use_intentions),
             timeout=int(self.timeout),
-            is_crash=bool(self.is_crash),
+            is_crashable=bool(self.is_crashable),
             goal_reward=self.goal_reward,
             dist_reward=self.dist_reward,
             dont_hold_item_penalty=self.dont_hold_item_penalty,

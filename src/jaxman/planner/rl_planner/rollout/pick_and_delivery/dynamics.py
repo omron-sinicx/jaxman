@@ -22,7 +22,6 @@ from jaxman.env.pick_and_delivery.dynamics import (
     _build_inner_step,
 )
 from jaxman.env.pick_and_delivery.observe import _build_observe
-from jaxman.planner.rl_planner.core import AgentObservation as ModelInput
 
 
 def _build_compute_agent_intention(

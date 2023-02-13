@@ -122,7 +122,7 @@ def update(
         return actor_loss, entropy
 
     def continuous_loss_fn(actor_params: FrozenDict) -> Tuple[Array, Dict]:
-        batch_size = batch.observations.shape[0]
+        batch_size = batch.observations.base_observation.shape[0]
         means, log_stds = actor.apply_fn(
             {"params": actor_params},
             batch.observations,

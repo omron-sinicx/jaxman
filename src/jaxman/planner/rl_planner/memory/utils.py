@@ -78,7 +78,7 @@ def _build_push_experience_to_buffer(
         idx = buffer.insert_index
         num_agents = experience.rewards.shape[-1]
 
-        dummy_obs = jnp.tile(jnp.zeros_like(experience.observations[-1]), k).reshape(
+        dummy_obs = jnp.tile(jnp.zeros_like(experience.observations[0][0]), k).reshape(
             k, -1
         )
         dummy_rew = jnp.zeros((k,))

@@ -20,7 +20,7 @@ level: 0
 timeout: 100
 rad: 0.02
 goal_rad: 0.02
-is_crash: True
+is_crashable: True
 # reward
 goal_reward: 3
 dist_reward: 0

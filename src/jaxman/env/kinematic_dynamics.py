@@ -4,7 +4,7 @@ Author: Hikaru Asano
 Affiliation: OMRON SINIC X / University of Tokyo
 """
 
-from typing import Callable, NamedTuple, Tuple
+from typing import Callable, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -168,7 +168,7 @@ def _build_compute_next_state(is_discrete: bool, is_diff_drive: bool):
 
 
 ### collide ###
-# agent collide ditection
+# agent collision ditection
 def _build_check_collision_with_agents(
     env_info: EnvInfo, agent_info: AgentInfo, is_discrete: bool
 ) -> Callable:

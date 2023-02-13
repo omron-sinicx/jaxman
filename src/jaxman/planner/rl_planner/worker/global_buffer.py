@@ -81,7 +81,7 @@ class GlobalBuffer(Buffer):
         """
         while True:
             if len(self.batched_data) <= 10:
-                data = self._sample_batch(self.batch_size)
+                data = self._sample_batch()
                 data_id = ray.put(data)
                 self.batched_data.append(data_id)
             else:
@@ -93,7 +93,7 @@ class GlobalBuffer(Buffer):
         """
 
         if len(self.batched_data) == 0:
-            data = self._sample_batch(self.batch_size)
+            data = self._sample_batch()
             data_id = ray.put(data)
             return data_id
         else:

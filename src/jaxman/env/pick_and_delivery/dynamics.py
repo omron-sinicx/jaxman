@@ -1,4 +1,4 @@
-"""Functions of dynamics for Pick and Delivery Env
+"""Environment dynamics functions for Pick and Delivery Env
 
 Author: Hikaru Asano
 Affiliation: OMRON SINIC X / University of Tokyo
@@ -35,7 +35,7 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
     """
     is_discrete = env_info.is_discrete
     num_agents = env_info.num_agents
-    is_crash = env_info.is_crash
+    is_crashable = env_info.is_crashable
     _compute_next_state = _build_compute_next_env_state(env_info, agent_info)
     _check_collision_wiht_agents = _build_check_collision_with_agents(
         env_info, agent_info, is_discrete
@@ -51,7 +51,12 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
     def _inner_step(
         state: State, actions: Array, task_info: TaskInfo, trial_info: TrialInfo
     ) -> Tuple[State, Array, Array, TrialInfo]:
-        """inner step function
+        """inner step function. inner step function consisting of the following steps:
+        1) compute next state by agent's movement action (don't consider load/unload action)
+        2) update agent and item state by agent's load/unload action
+        3) check if any agent collides with obstacles/other agents
+        4) check if item is delivered at its goal
+        5) create return vals
 
         Args:
             state (State): current agent and item state
@@ -91,8 +96,8 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         rews, done, new_trial_info = _compute_rew_done_info(
             state,
             possible_next_state,
-            agent_collided * is_crash,
-            item_collided * is_crash,
+            agent_collided * is_crashable,
+            item_collided * is_crashable,
             solved,
             task_info,
             trial_info,
@@ -104,7 +109,7 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         ang = possible_next_state.agent_state.ang * not_finished_agents
         new_agent_state = possible_next_state.agent_state._replace(vel=vel, ang=ang)
 
-        if not is_crash:
+        if not is_crashable:
             new_agent_state = AgentState.from_array(
                 (
                     state.agent_state.cat() * agent_collided.reshape(num_agents, -1)
@@ -114,7 +119,7 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
             )
 
         # if item finish episode, set item position to INF
-        done_item = jnp.logical_or(item_collided * is_crash, solved)
+        done_item = jnp.logical_or(item_collided * is_crashable, solved)
         item_pos = jax.vmap(lambda pos, done: pos + done * INF)(
             possible_next_state.item_pos, done_item
         )
@@ -129,14 +134,14 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
 
 
 def _build_compute_next_env_state(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
-    """build function to compute next environment state
+    """build function to compute next agent and item state
 
     Args:
         env_info (EnvInfo): environment base information
         agent_info (AgentInfo): agent kinematics information
 
     Returns:
-        Callable: jit-compiled function to compute next state
+        Callable: jit-compiled function to compute next agent and item state
     """
     _compute_agent_next_state = _build_compute_next_agent_state(env_info)
     _compute_next_item_state = _build_compute_next_item_state(env_info, agent_info)
@@ -155,14 +160,36 @@ def _build_compute_next_env_state(env_info: EnvInfo, agent_info: AgentInfo) -> C
     return jax.jit(_compute_next_env_state)
 
 
-def _build_compute_next_agent_state(env_info: EnvInfo):
+def _build_compute_next_agent_state(env_info: EnvInfo) -> Callable:
+    """
+    build jit-compiled function to compute next agent state
+
+    Args:
+        env_info (EnvInfo): environment base informations
+
+    Returns:
+        Callable: jit-compiled function
+    """
+
     _compute_next_state = _build_compute_next_state(
         env_info.is_discrete, env_info.is_diff_drive
     )
 
     def _apply_load_or_unload(
         current_state: State, next_possible_state: AgentState, action: Array
-    ):
+    ) -> AgentState:
+        """
+        update agent state by considering load/unload action
+        if agent choice load/unload action agent try to load/unload item and stay still the current position
+
+        Args:
+            current_state (State): agent current state
+            next_possible_state (AgentState): agent next state
+            action (Array): action
+
+        Returns:
+            AgentState: updated agent next state
+        """
         can_move = action < 5
         arrayed_next_state = (
             can_move * next_possible_state.cat() + ~can_move * current_state.cat()
@@ -181,7 +208,18 @@ def _build_compute_next_agent_state(env_info: EnvInfo):
     return jax.jit(_compute_agent_next_state)
 
 
-def _build_compute_next_item_state(env_info: EnvInfo, agent_info: AgentInfo):
+def _build_compute_next_item_state(
+    env_info: EnvInfo, agent_info: AgentInfo
+) -> Callable:
+    """build jit-compiled functino to compute item next state
+
+    Args:
+        env_info (EnvInfo): environment base information
+        agent_info (AgentInfo): agent kinematic information
+
+    Returns:
+        Callable: jit-compiled function
+    """
     num_items = env_info.num_items
     dummy_index = num_items
     num_agents = env_info.num_agents
@@ -197,7 +235,7 @@ def _build_compute_next_item_state(env_info: EnvInfo, agent_info: AgentInfo):
         """compute item next state to be jax.lax.for_i_loop
 
         Args:
-            i (int): for_loop index
+            i (int): for_loop agent index
             carry (Carry): information carrier
 
         Step:
@@ -226,7 +264,21 @@ def _build_compute_next_item_state(env_info: EnvInfo, agent_info: AgentInfo):
             return carry
 
         def load_or_unload(i: int, carry: Carry):
+            """
+            load or unload item.
+            if agent is carrying item, then agent try to unload item, and vice versa
+
+            Args:
+                i (int): for_loop agent index
+                carry (Carry): information carrier
+            """
+
             def unload_items(i: int, carry: Carry):
+                """
+                try to unload item
+                The agent unloads the item if there is nothing at the destination where the item is to be unloaded;
+                otherwise, the item remains loaded.
+                """
                 # grid case
                 possible_item_pos = carry.state.pos[i] + jnp.array([0, -1], dtype=int)
                 # Check whether there are any obstacles at the location to unload
@@ -257,6 +309,10 @@ def _build_compute_next_item_state(env_info: EnvInfo, agent_info: AgentInfo):
                 )
 
             def load_items(i: int, carry: Carry):
+                """
+                load item if there is an item in neighbor
+                and remain unloaded if there is no item in neighbor
+                """
                 dist_to_item = jnp.sum(
                     (carry.item_pos - carry.state.pos[i]) ** 2, axis=1
                 )
@@ -298,6 +354,13 @@ def _build_compute_next_item_state(env_info: EnvInfo, agent_info: AgentInfo):
 
 
 def _build_check_collision_with_items(is_discrete: bool, agent_info: AgentInfo):
+    """build jit compiled collision check function
+
+    Args:
+        is_discrete (bool): whether agent action space is discrete or not
+        agent_info (AgentInfo): agent kinematic informations
+    """
+
     def _check_discrete_collision_with_items(pos: Array, item_pos: Array):
         collide = jax.vmap(
             lambda pos, item_pos: jnp.any(jnp.all(jnp.equal(item_pos, pos), axis=-1)),

@@ -20,9 +20,9 @@ def _build_extract_fov(env_info: EnvInfo):
     fov_r = env_info.fov_r
     own_position_map = jnp.zeros((fov_r * 2 + 1, fov_r * 2 + 1)).at[fov_r, fov_r].set(1)
 
-    def rot90_traceable(fov, rot):
-        rot = (rot + 2) % 4
-        return jax.lax.switch(rot, [partial(jnp.rot90, fov, rot=i) for i in range(4)])
+    def rot90_traceable(m, k):
+        k = (k + 2) % 4
+        return jax.lax.switch(k, [partial(jnp.rot90, m, k=i) for i in range(4)])
 
     def _extract_fov(state: AgentState, obs_agent_map: Array) -> Array:
         """

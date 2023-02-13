@@ -6,8 +6,6 @@ import jax
 import jax.numpy as jnp
 import ray
 from jaxman.env.navigation.env import JaxMANEnv
-
-# from jaxman.env.navigation.env import JaxMANEnv
 from jaxman.env.pick_and_delivery.env import JaxPandDEnv
 from jaxman.planner.rl_planner.agent.core import create_agent
 from jaxman.planner.rl_planner.agent.sac.sac import restore_sac_actor
@@ -86,6 +84,7 @@ def main(config):
             learner,
             agent.actor,
             env.instance,
+            config.model.name,
             config.seed,
         )
         rollout_worker.run.remote()
@@ -93,6 +92,7 @@ def main(config):
             learner,
             agent.actor,
             env.instance,
+            config.model.name,
             config.seed,
         )
         evaluator.run.remote()

@@ -77,25 +77,22 @@ def plot_carried_item(image, x, y, color):
 
 def render_agent_and_obstacles(
     state: AgentState,
-    # goals: Array,
     occupancy: Array,
     is_collided: Array = None,
     done: Array = None,
     is_diff_drive: bool = False,
     is_colorful: bool = False,
-    # high_quality: bool = False,
 ):
     """
     plot agent and obstacles
 
     Args:
         state (AgentState): agent current state
-        goals (Array): Goal locations of agents
         occupancy (Array): Occunacy map
         is_collided (TrialInfo, optional): trial information
         done (Array, optional): done for each agent
         is_diff_drive (bool, optional): whether environment is diff drive env or not
-        high_quality (bool, optional): whether to output high resolution rendering map
+        is_colorful (bool, optional): Are all agents the same color or are they colorful?
     """
     # resize
     occupancy = np.array(occupancy)
@@ -147,7 +144,18 @@ def render_agent_and_obstacles(
     return bg
 
 
-def render_navigation(image: np.ndarray, goals: Array):
+def render_navigation(image: np.ndarray, goals: Array) -> np.ndarray:
+    """
+    render navigation task
+    this function is used with `render_agent_and_obstacles`
+
+    Args:
+        image (np.ndarray): agent and obstacle image
+        goals (Array): agent goals
+
+    Returns:
+        np.ndarray: image of navigation task
+    """
     # render agent goals
     goals = goals * 3 + 1
     for i in range(len(goals)):
@@ -157,8 +165,21 @@ def render_navigation(image: np.ndarray, goals: Array):
     return image
 
 
-def render_pick_and_delivery(image: np.ndarray, state: State, goals: Array):
-    # render item position and goals
+def render_pick_and_delivery(
+    image: np.ndarray, state: State, goals: Array
+) -> np.ndarray:
+    """
+    render pick and delivery task
+    this function is used with `render_agent_and_obstacles`
+
+    Args:
+        image (np.ndarray): agent and obstacle image
+        state (np.ndarray): agent and item state
+        goals (Array): agent goals
+
+    Returns:
+        np.ndarray: image of navigation task
+    """
 
     num_items = len(goals)
     agent_pos = state.agent_state.pos * 3 + 1
@@ -189,7 +210,16 @@ def render_pick_and_delivery(image: np.ndarray, state: State, goals: Array):
     return image
 
 
-def update_image_to_hihg_revolution(img: np.ndarray, occupancy: Array):
+def update_image_to_hihg_resolution(img: np.ndarray, occupancy: Array) -> np.ndarray:
+    """update low-resolution images to high-resolution
+
+    Args:
+        img (np.ndarray): original low-resolution image
+        occupancy (Array): occupancy map
+
+    Returns:
+        np.ndarray: updated high-resolution image
+    """
     fig, axes = plt.subplots(1, 1, figsize=[10, 10])
     axes.imshow(img)
     map_size = occupancy.shape[0]
@@ -219,7 +249,22 @@ def render_env(
     is_diff_drive: bool = False,
     is_high_resolution: bool = False,
     task_type: str = "navigation",
-):
+) -> np.ndarray:
+    """render environment
+
+    Args:
+        state (Union[AgentState, State]): environment state
+        goals (Array): goals
+        occupancy (Array): obstacle occupancy map
+        trial_info (TrialInfo, optional): trial information. Defaults to None.
+        done (Array, optional): episode done for each agents. Defaults to None.
+        is_diff_drive (bool, optional): whether agent action space is diff-drive or not. Defaults to False.
+        is_high_resolution (bool, optional): whether update image to high-resolution. Defaults to False.
+        task_type (str, optional): task type (navigation or pick and delivery). Defaults to "navigation".
+
+    Returns:
+        np.ndarray: environment image
+    """
     is_navigation = task_type == "navigation"
     if is_navigation:
         agent_state = state
@@ -244,6 +289,6 @@ def render_env(
         img = render_pick_and_delivery(img, state, goals)
 
     if is_high_resolution:
-        img = update_image_to_hihg_revolution(img, occupancy)
+        img = update_image_to_hihg_resolution(img, occupancy)
 
     return img

@@ -14,11 +14,9 @@ from jaxman.env.kinematic_dynamics import (
     _build_compute_next_state,
     _build_get_relative_positions,
 )
+from jaxman.env.navigation.core import AgentObservation, TaskInfo, TrialInfo
 from jaxman.env.navigation.dynamics import _build_inner_step
 from jaxman.env.navigation.observe import _build_observe
-from jaxman.env.pick_and_delivery.core import AgentObservation, TaskInfo, TrialInfo
-
-from ...core import AgentObservation as ModelInput
 
 
 def _build_compute_agent_intention(
@@ -59,15 +57,12 @@ def _build_compute_agent_intention(
         dummy_observation = observations._replace(
             communication=dummy_comm, agent_mask=dummy_mask
         )
-        q_value = actor_fn({"params": actor_params}, dummy_observation)
         if is_discrete:
-            actions = jnp.argmax(q_value, axis=-1)
+            q_values = actor_fn({"params": actor_params}, dummy_observation)
+            actions = jnp.argmax(q_values, axis=-1)
         else:
-            actions = q_value
-
-        # compute relative position
+            actions, _ = actor_fn({"params": actor_params}, dummy_observation)
         next_possible_state = jax.vmap(_compute_next_state)(state, actions, agent_info)
-
         intentions = _compute_relative_pos(state, next_possible_state)
         return intentions
 

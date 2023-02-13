@@ -29,7 +29,7 @@ class EnvInfo(NamedTuple):
     scan_range: float
     use_intentions: bool
     timeout: int
-    is_crash: bool
+    is_crashable: bool
     goal_reward: float
     dist_reward: float
     dont_hold_item_penalty: float

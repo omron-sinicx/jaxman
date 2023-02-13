@@ -1,20 +1,22 @@
-from typing import Callable, Tuple
+"""Environment dynamics functions for navigation Env
+
+Author: Hikaru Asano
+Affiliation: OMRON SINIC X / University of Tokyo
+"""
+
+from typing import Tuple
 
 import jax
 import jax.numpy as jnp
 from chex import Array
-from jaxman.planner.dwa import DWAPlanner
 
 from ..core import AgentInfo, AgentState, EnvInfo
 from ..kinematic_dynamics import (
     _build_check_collision_with_agents,
     _build_check_collision_with_obs,
     _build_compute_next_state,
-    _get_agent_dist,
-    _get_obstacle_dist,
 )
-from .core import AgentObservation, TaskInfo, TrialInfo
-from .observe import _build_observe
+from .core import TaskInfo, TrialInfo
 
 
 # step function
@@ -28,16 +30,6 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
     )
     _check_collision_with_obs = _build_check_collision_with_obs(agent_info, is_discrete)
     _get_solve = _build_is_solved(agent_info, is_discrete)
-    # if is_discrete:
-    #     planner = None
-    # else:
-    #     planner = DWAPlanner(
-    #         compute_next_state=_compute_next_state,
-    #         get_obstacle_dist=_get_obstacle_dist,
-    #         get_agent_dist=_get_agent_dist,
-    #         agent_info=agent_info,
-    #     )
-    # _observe = _build_observe(env_info, agent_info, planner)
 
     def _step(
         state: AgentState, actions: Array, task_info: TaskInfo, trial_info: TrialInfo
@@ -46,7 +38,7 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
         Step function consisting of the following steps:
         1) compute next state
         2) check if any agent collides with obstacles/other agents
-        3) check if all agents arrive at their goal
+        3) check if each agents arrive at their goal
         4) create return vals
 
          Args:
@@ -87,8 +79,6 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
         ang = possible_next_state.ang * not_finished_agents
         next_state = possible_next_state._replace(vel=vel, ang=ang)
 
-        # observation = _observe(next_state, task_info, jnp.logical_not(done))
-
         return next_state, rew, done, new_trial_info
 
     return jax.jit(_step)
@@ -97,10 +87,10 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
 def _build_compute_reward(env_info: EnvInfo):
     def _compute_reward(old_trial_info: TrialInfo, new_trial_info: TrialInfo) -> float:
         """
-        compute sparse reward given the current environment status.
-        If the task is solved, the agent will be rewarded with a positive scalar attenuated by the elapsed time.
-        Otherwise, just 0 will be returned.
-        Note: this function should be modified to make RL easier
+        compute reward for each agnet. agent reward consists of three components.
+        1) goal_reward: Incentives for the agent to reach the goal given when the goal is reached
+        2) crash_penalty: Incentives for agents to act safely given when a collision occurs
+        3) time_penalty: Incentives for agent to reach the goal as quick as possible given every step
 
         Args:
             old_trial_info (TrialInfo): current trial's status
@@ -113,7 +103,7 @@ def _build_compute_reward(env_info: EnvInfo):
         is_collide = new_trial_info.collided_time < jnp.inf
         collide_penalty = is_collide * env_info.crash_penalty
 
-        reward = solved + collide_penalty + env_info.time_penalty  # 0 ~ 1 scalar
+        reward = solved + collide_penalty + env_info.time_penalty
         not_finished_list = ~jnp.logical_or(
             old_trial_info.solved, old_trial_info.collided
         )
@@ -134,7 +124,7 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
 
         Args:
             obs_collided (Array): is agent collide with obstacles
-            obs_collided (Array): is agent collide with other agents
+            agent_collided (Array): is agent collide with other agents
             solved (Array): is agent solve own task
             trial_info (TrialInfo): previous trial info
 
@@ -169,8 +159,6 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
         # check timeout
         timesteps = trial_info.timesteps + 1
         is_timeout = timesteps >= env_info.timeout
-
-        # timeout = jnp.array([is_timeout] * env_info.num_agents)
         timeout = is_timeout & (~jnp.logical_or(solved, collided))
 
         # create env_info
@@ -206,7 +194,7 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
 def _build_is_solved(agent_info: AgentInfo, is_discrete: bool):
     def _discrete_is_solved(pos: Array, goals: Array):
         """
-        compute is discrete agent solve its own task.
+        compu whether discrete agent solve its own task.
 
         Args:
             pos (Array): current agent position
@@ -219,7 +207,7 @@ def _build_is_solved(agent_info: AgentInfo, is_discrete: bool):
 
     def _continuous_is_solved(pos, goals):
         """
-        compute is discrete agent solve its own task.
+        compute whether discrete agent solve its own task.
 
         Args:
             pos (Array): current agent position
