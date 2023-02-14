@@ -5,58 +5,54 @@ from omegaconf import OmegaConf
 
 
 def test_grid_env():
-    config = hydra.utils.instantiate(OmegaConf.load("scripts/config/env/grid.yaml"))
+    config = hydra.utils.instantiate(
+        OmegaConf.load("scripts/config/env/navigation/grid.yaml")
+    )
 
     env = JaxMANEnv(config)
     obs = env.reset()
     done = False
-    actions = env.sample_actions()
-    while not done:
+    base_actions = jnp.ones_like(env.sample_actions())
+    for i in range(env.action_space.n):
+        actions = base_actions * i
         obs, rew, done, info = env.step(actions)
-        actions = env.sample_actions()
         done = jnp.all(done)
 
 
 def test_diff_drive_env():
     config = hydra.utils.instantiate(
-        OmegaConf.load("scripts/config/env/diff_drive.yaml")
+        OmegaConf.load("scripts/config/env/navigation/diff_drive.yaml")
     )
 
     env = JaxMANEnv(config)
     obs = env.reset()
     done = False
-    actions = env.sample_actions()
-    while not done:
+    base_actions = jnp.ones_like(env.sample_actions())
+    for i in range(env.action_space.n):
+        actions = base_actions * i
         obs, rew, done, info = env.step(actions)
-        actions = env.sample_actions()
         done = jnp.all(done)
 
 
 def test_continuous_env():
     config = hydra.utils.instantiate(
-        OmegaConf.load("scripts/config/env/continuous.yaml")
+        OmegaConf.load("scripts/config/env/navigation/continuous.yaml")
     )
 
     env = JaxMANEnv(config)
     obs = env.reset()
     done = False
     actions = env.sample_actions()
-    while not done:
-        obs, rew, done, info = env.step(actions)
-        actions = env.sample_actions()
-        done = jnp.all(done)
+    obs, rew, done, info = env.step(actions)
 
 
 def test_planner():
     config = hydra.utils.instantiate(
-        OmegaConf.load("scripts/config/env/continuous.yaml")
+        OmegaConf.load("scripts/config/env/navigation/continuous.yaml")
     )
 
     env = JaxMANEnv(config)
     obs = env.reset()
     done = False
     actions = obs.planner_act
-    while not done:
-        obs, rew, done, info = env.step(actions)
-        actions = obs.planner_act
-        done = jnp.all(done)
+    obs, rew, done, info = env.step(actions)
