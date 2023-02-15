@@ -72,9 +72,19 @@ def sample_random_pos(
     Returns:
         Tuple[Array, Array]: sampled agent start and goal
     """
+    start_key, goal_key = jax.random.split(key)
     if sample_type == "uniform":
-        starts, goals = sample_uniform(
-            key,
+        starts = sample_uniform(
+            start_key,
+            num_agents,
+            rads.flatten(),
+            obs,
+            is_discrete,
+            no_overlap,
+            num_max_trials,
+        )
+        goals = sample_uniform(
+            goal_key,
             num_agents,
             rads.flatten(),
             obs,
@@ -83,12 +93,23 @@ def sample_random_pos(
             num_max_trials,
         )
     else:
-        starts, goals = sample_from_corner(
-            key,
+        starts = sample_from_corner(
+            start_key,
             num_agents,
             rads.flatten(),
             obs,
             is_discrete,
+            "start",
+            no_overlap,
+            num_max_trials,
+        )
+        goals = sample_from_corner(
+            goal_key,
+            num_agents,
+            rads.flatten(),
+            obs,
+            is_discrete,
+            "goals",
             no_overlap,
             num_max_trials,
         )
@@ -97,6 +118,78 @@ def sample_random_pos(
         starts = jnp.minimum((starts * map_size).astype(int), map_size - 1)
         goals = jnp.minimum((goals * map_size).astype(int), map_size - 1)
     return starts, goals
+
+
+@partial(
+    jax.jit,
+    static_argnames=(
+        "num_agents",
+        "num_items",
+        "num_max_trials",
+        "is_discrete",
+        "sample_type",
+    ),
+)
+def sample_random_agent_item_pos(
+    key: PRNGKey,
+    rads: Array,
+    obs: ObstacleMap,
+    num_agents: int,
+    num_items: int,
+    is_discrete: bool,
+    no_overlap: bool = True,
+    sample_type: str = "uniform",
+    num_max_trials: bool = 200,
+) -> Tuple[Array, Array]:
+    """sample agent start and goal position
+
+    Args:
+        key (PRNGKey): random key variables
+        rads (Array): agent radius
+        obs (ObstacleMap): obstacle map
+        num_agents (int): number of agent
+        num_items (int): number of items in environment
+        is_discrete (bool): whether environment is discrete space or not
+        no_overlap (bool, optional): whether to allow overlap in sampled positions. Defaults to True.
+        sample_type (str, optional): sample type. Defaults to "uniform".
+        num_max_trials (int, optional): maximum number of resampling. Defaults to 100.
+
+    Returns:
+        Tuple[Array, Array]: sampled agent start and goal
+    """
+    start_key, goal_key = jax.random.split(key)
+    max_rad = jnp.max(rads.flatten())
+    if sample_type == "uniform":
+        agent_item_starts_goals = sample_uniform(
+            start_key,
+            num_agents + num_items * 2,
+            max_rad,
+            obs,
+            is_discrete,
+            no_overlap,
+            num_max_trials,
+        )
+    else:
+        agent_item_starts_goals = sample_from_corner(
+            start_key,
+            num_agents + num_items * 2,
+            max_rad,
+            obs,
+            is_discrete,
+            "start",
+            no_overlap,
+            num_max_trials,
+        )
+    if is_discrete:
+        map_size = obs.sdf.shape[0]
+        agent_item_starts_goals = jnp.minimum(
+            (agent_item_starts_goals * map_size).astype(int), map_size - 1
+        )
+    return (
+        agent_item_starts_goals[:num_agents],
+        agent_item_starts_goals[num_agents : (num_agents + num_items)],
+        agent_item_starts_goals[-num_items:],
+    )
 
 
 @partial(jax.jit, static_argnames=("num_samples", "num_max_trials", "is_discrete"))
@@ -127,12 +220,11 @@ def sample_uniform(
 
     if rads.size == 1:
         rads = jnp.ones(num_samples) * rads
-    key0, key1, key2, key3 = jax.random.split(key, 4)
-    carried_start = jax.random.uniform(key0, (num_samples, 2))
-    carried_goal = jax.random.uniform(key1, (num_samples, 2))
+    key0, key1 = jax.random.split(key)
+    carried_pos = jax.random.uniform(key0, (num_samples, 2))
 
-    loop_carry = [key2, carried_start, rads, obs]
-    starts = jax.lax.fori_loop(
+    loop_carry = [key1, carried_pos, rads, obs]
+    pos = jax.lax.fori_loop(
         0,
         num_samples,
         partial(
@@ -143,20 +235,7 @@ def sample_uniform(
         ),
         loop_carry,
     )[1]
-
-    loop_carry = [key3, carried_goal, rads, obs]
-    goals = jax.lax.fori_loop(
-        0,
-        num_samples,
-        partial(
-            _sample_random_pos,
-            is_discrete=is_discrete,
-            no_overlap=no_overlap,
-            num_max_trials=num_max_trials,
-        ),
-        loop_carry,
-    )[1]
-    return starts, goals
+    return pos
 
 
 def _sample_random_pos(
@@ -181,10 +260,22 @@ def _sample_random_pos(
         map_size = obs.sdf.shape[0]
         pos_int = jnp.minimum((target_pos * map_size).astype(int), map_size - 1)
         if is_discrete:
-            obs_overlap = jnp.array(obs.occupancy[pos_int[0], pos_int[1]], dtype=bool)
-            carry_int = jnp.minimum((carried_pos * map_size).astype(int), map_size - 1)
-            agent_overlap = jnp.any(jnp.all(jnp.equal(pos_int, carry_int), axis=-1))
+            # Ensure that there are no obstacles above or below the currently sampled position
+            obs_overlap = jnp.any(
+                jax.lax.dynamic_slice_in_dim(
+                    obs.occupancy[pos_int[0]], pos_int[1] - 1, 3, 0
+                )
+            )
+            pos = jnp.minimum((carried_pos * map_size).astype(int), map_size - 1)
+            pos_with_above = jnp.concatenate((pos, pos + jnp.array([0, 1])))
+            pos_with_above_below = jnp.concatenate(
+                (pos_with_above, pos + jnp.array([0, -1]))
+            )
+            agent_overlap = jnp.any(
+                jnp.all(jnp.equal(pos_int, pos_with_above_below), axis=-1)
+            )
             return obs_overlap | agent_overlap
+
         else:
             return (
                 jnp.any(
@@ -250,13 +341,16 @@ def _sample_random_pos(
     return [key, carried_pos, rads, obs]
 
 
-@partial(jax.jit, static_argnames=("num_agent", "num_max_trials", "is_discrete"))
+@partial(
+    jax.jit, static_argnames=("num_agent", "num_max_trials", "is_discrete", "pos_type")
+)
 def sample_from_corner(
     key: PRNGKey,
     num_agent: int,
     rads: Array,
     obs: ObstacleMap,
     is_discrete: bool,
+    pos_type: str,
     no_overlap: bool = False,
     num_max_trials: int = 100,
 ) -> Array:
@@ -269,6 +363,7 @@ def sample_from_corner(
         rads (Array): agent's radius
         obs (ObstacleMap): obstacle map
         is_discrete (bool): whether environment action space is discrete or not
+        pos_type (str): type of position to sample (start or goal)
         no_overlap (bool, optional): whether or not to allow each vertices to be overlapped within agent radius. Defaults to False.
         num_max_trials (int, optional): maximum number of resampling. Defaults to 100.
 
@@ -278,39 +373,25 @@ def sample_from_corner(
 
     if rads.size == 1:
         rads = jnp.ones(num_agent) * rads
-    key0, key1, key2, key3 = jax.random.split(key, 4)
-    start_dist = _build_target_pos("corner", "start", 0.2, 0.05)
-    goal_dist = _build_target_pos("corner", "goal", 0.2, 0.05)
+    key0, key1 = jax.random.split(key, 4)
+
+    sample_dist = _build_target_pos("corner", pos_type, 0.2, 0.05)
 
     carried_start = jax.random.uniform(key0, (num_agent, 2))
     start_carry = [key1, carried_start, rads, obs]
-    starts = jax.lax.fori_loop(
+    pos = jax.lax.fori_loop(
         0,
         num_agent,
         partial(
             _sample_from_corner,
-            sample_dist=start_dist,
+            sample_dist=sample_dist,
             is_discrete=is_discrete,
             no_overlap=no_overlap,
             num_max_trials=num_max_trials,
         ),
         start_carry,
     )[1]
-    carried_goal = jax.random.uniform(key2, (num_agent, 2))
-    goal_carry = [key3, carried_goal, rads, obs]
-    goals = jax.lax.fori_loop(
-        0,
-        num_agent,
-        partial(
-            _sample_from_corner,
-            sample_dist=goal_dist,
-            is_discrete=is_discrete,
-            no_overlap=no_overlap,
-            num_max_trials=num_max_trials,
-        ),
-        goal_carry,
-    )[1]
-    return starts, goals
+    return pos
 
 
 def _sample_from_corner(

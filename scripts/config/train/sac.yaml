@@ -1,14 +1,34 @@
 # learnig parameters
-horizon: 1000000
-gamma: 0.95
+horizon: 5000000
+gamma: 0.99
 tau: 0.005
-target_entropy_ratio: 0.05
+target_entropy_ratio: 0.25
 batch_size: 256
 auto_temp_tuning: True
 save_interval: 100000
 warmup_iters: 10000
 # buffer
-capacity: 1500000
+capacity: 1000000
 use_per: False
+per_alpha: 0.45
+per_beta: 0.55
+use_separete_sample: False
 # evaluate
 eval_iters: 1000
+# curriculum
+use_pretrained_model: False
+# persistent advantage learning
+is_pal: True
+alpha: 0.9
+# double deep q learning
+use_ddqn: True
+# transform operator
+transform_q: False
+# multi step learning
+k: 4
+use_k_step_learning: True
+# batch normalization
+use_batch_norm: True
+batch_norm_tau: 0.99
+use_only_mean: False
+use_only_std: False

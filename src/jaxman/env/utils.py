@@ -1,18 +1,14 @@
-"""
-utility for environment
+"""utility for environment
 
 Author: Hikaru Asano
 Affiliation: OMRON SINIC X / University of Tokyo
 """
 
-from dataclasses import dataclass
 from functools import partial
 
 import jax
 import jax.numpy as jnp
-import numpy as np
-from chex import Array, PRNGKey
-from jax import vmap
+from chex import Array
 
 
 def xy_to_ij(pts, image_size: int) -> Array:

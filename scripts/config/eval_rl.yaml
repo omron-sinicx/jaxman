@@ -6,8 +6,8 @@ defaults:
   - _self_
   - model: sac
   - train: sac
-  - env: grid
+  - env: pick_and_delivery/grid
 
 hydra:
   run:
-    dir: results_eval/${env.name}_${env.obs_type}/n${env.num_agents}_level${env.level}/${model.name}_${now:%Y-%m-%d_%H-%M-%S}
+    dir: results_eval/${env.env_name}/{env.name}_${env.obs_type}/n${env.num_agents}_level${env.level}/${model.name}_${now:%Y-%m-%d_%H-%M-%S}

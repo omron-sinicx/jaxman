@@ -12,10 +12,9 @@ import jax
 import numpy as np
 import ray
 from flax.training import checkpoints
-from flax.training.train_state import TrainState
 from omegaconf.dictconfig import DictConfig
 
-from ..agent.sac.sac import _update_sac_jit
+from ..agent.core import Agent, _update_jit
 from .global_buffer import GlobalBuffer
 
 
@@ -24,10 +23,7 @@ class Learner:
     def __init__(
         self,
         buffer: GlobalBuffer,
-        actor: TrainState,
-        critic: TrainState,
-        target_critic: TrainState,
-        temp: TrainState,
+        agent: Agent,
         action_scale: np.ndarray,
         action_bias: np.ndarray,
         target_entropy: bool,
@@ -38,10 +34,7 @@ class Learner:
 
         Args:
             buffer (GlobalBuffer): global buffer to sample batch
-            actor (TrainState): actor
-            critic (TrainState): critic
-            target_critic (TrainState): target critic
-            temp (TrainState): temperature
+            agent (Agent): Namedtuple contain agent components.
             action_scale (np.ndarray): action scale
             action_bias (np.ndarray): action bias
             target_entropy (bool): target value of entropy of agent actions
@@ -53,16 +46,19 @@ class Learner:
 
         # agent
         self.buffer = buffer
-        self.actor = actor
-        self.critic = critic
-        self.target_critic = target_critic
-        self.temp = temp
+        self.agent = agent
 
+        self.agent_name = config.model.name
         self.is_discrete = config.env.is_discrete
         self.num_agent = config.env.num_agents
         self.batch_size = config.train.batch_size
         self.save_interval = int(config.train.save_interval)
         self.warmup_iters = config.train.warmup_iters
+        self.is_pal = config.train.is_pal
+        self.alpha = config.train.alpha
+        self.use_ddqn = config.train.use_ddqn
+        self.use_k_step_learning = config.train.use_k_step_learning
+        self.k = config.train.k
 
         self.action_scale = action_scale
         self.action_bias = action_bias
@@ -77,10 +73,10 @@ class Learner:
         self.last_counter = 0
         self.loss = []
 
-        actor_params = self.actor.params
+        actor_params = self.agent.actor.params
         self.actor_params_id = ray.put(actor_params)
-        critic_params = self.critic.params
-        self.critic_params_id = ray.put(critic_params)
+        self.critic_params_id = ray.put(None)
+        self.train_actor_id = ray.put(self.train_actor)
 
     def run(self) -> None:
         """
@@ -99,27 +95,24 @@ class Learner:
             loss_info = {}
             self.train_actor = i > self.warmup_iters
             data = ray.get(ray.get(self.buffer.get_batched_data.remote()))
-            (
+            # time.sleep(0.03)
+            (key, self.agent, priority, loss_info,) = _update_jit(
                 key,
-                self.actor,
-                self.critic,
-                self.target_critic,
-                self.temp,
-                loss_info,
-            ) = _update_sac_jit(
-                key,
-                self.actor,
-                self.critic,
-                self.target_critic,
-                self.temp,
+                self.agent,
                 data,
                 self.gamma,
                 self.tau,
                 self.is_discrete,
                 self.target_entropy,
-                True,  # carry.step % carry.target_update_period == 0,
                 self.auto_temp_tuning,
+                True,  # carry.step % carry.target_update_period == 0,
+                self.is_pal,
+                self.alpha,
+                self.use_ddqn,
+                self.use_k_step_learning,
+                self.k,
                 self.train_actor,
+                self.agent_name,
             )
 
             self.loss.append(loss_info)
@@ -130,6 +123,8 @@ class Learner:
             if i % self.save_interval == 0:
                 self.save_model()
 
+            self.buffer.update_priority.remote(data.index, priority)
+
             self.counter += 1
         self.done = True
 
@@ -137,16 +132,17 @@ class Learner:
         """
         store up to data actor parameters in shared memory
         """
-        actor_params = self.actor.params
+        actor_params = self.agent.actor.params
         self.actor_params_id = ray.put(actor_params)
-        critic_params = self.critic.params
-        self.critic_params_id = ray.put(critic_params)
+        # critic_params = self.critic.params
+        self.critic_params_id = ray.put(None)
+        self.train_actor_id = ray.put(self.train_actor)
 
     def get_params(self):
         """
         return agent parameter id
         """
-        return self.actor_params_id, self.critic_params_id
+        return self.actor_params_id, self.critic_params_id, self.train_actor_id
 
     def stats(self, interval: int) -> Tuple[bool, dict, int]:
         """
@@ -174,29 +170,29 @@ class Learner:
         """
         checkpoints.save_checkpoint(
             ckpt_dir=self.save_dir,
-            target=self.actor,
+            target=self.agent.actor,
             prefix="actor_checkpoint_",
             step=self.counter,
             overwrite=True,
         )
-        checkpoints.save_checkpoint(
-            ckpt_dir=self.save_dir,
-            target=self.critic,
-            prefix="critic_checkpoint_",
-            step=self.counter,
-            overwrite=True,
-        )
-        checkpoints.save_checkpoint(
-            ckpt_dir=self.save_dir,
-            target=self.target_critic,
-            prefix="target_critic_checkpoint_",
-            step=self.counter,
-            overwrite=True,
-        )
-        checkpoints.save_checkpoint(
-            ckpt_dir=self.save_dir,
-            target=self.temp,
-            prefix="temp_checkpoint_",
-            step=self.counter,
-            overwrite=True,
-        )
+        # checkpoints.save_checkpoint(
+        #     ckpt_dir=self.save_dir,
+        #     target=self.critic,
+        #     prefix="critic_checkpoint_",
+        #     step=self.counter,
+        #     overwrite=True,
+        # )
+        # checkpoints.save_checkpoint(
+        #     ckpt_dir=self.save_dir,
+        #     target=self.target_critic,
+        #     prefix="target_critic_checkpoint_",
+        #     step=self.counter,
+        #     overwrite=True,
+        # )
+        # checkpoints.save_checkpoint(
+        #     ckpt_dir=self.save_dir,
+        #     target=self.temp,
+        #     prefix="temp_checkpoint_",
+        #     step=self.counter,
+        #     overwrite=True,
+        # )

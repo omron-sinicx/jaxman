@@ -5,8 +5,10 @@ import hydra
 import jax
 import jax.numpy as jnp
 import ray
-from jaxman.env.env import JaxMANEnv
-from jaxman.planner.rl_planner.agent.sac.sac import create_sac_agent, restore_sac_actor
+from jaxman.env.navigation.env import JaxMANEnv
+from jaxman.env.pick_and_delivery.env import JaxPandDEnv
+from jaxman.planner.rl_planner.agent.core import create_agent
+from jaxman.planner.rl_planner.agent.sac.sac import restore_sac_actor
 from jaxman.planner.rl_planner.logger import LogResult
 from jaxman.planner.rl_planner.worker import (
     Evaluator,
@@ -34,23 +36,30 @@ def main(config):
         writer = SummaryWriter(logdir=f"./tb/seed_{seed}")
 
         logger = LogResult(writer, config)
-
         # initialize enrironment
-        env = JaxMANEnv(config.env, config.seed)
+        if config.env.env_name == "navigation":
+            env = JaxMANEnv(config.env, config.seed)
+        else:
+            env = JaxPandDEnv(config.env, config.seed)
         observation_space = env.observation_space
         action_space = env.action_space
-        buffer = GlobalBuffer.remote(observation_space, action_space, config.train)
+        buffer = GlobalBuffer.remote(observation_space, action_space, config)
 
         key = jax.random.PRNGKey(config.seed)
-        actor, critic, target_critic, temp, key = create_sac_agent(
+        agent, key = create_agent(
             observation_space,
             action_space,
             config.model,
             key,
         )
-        actor = restore_sac_actor(
-            actor, config.env.is_discrete, config.env.is_diff_drive, "../../../../model"
-        )
+        if config.train.use_pretrained_model:
+            actor = restore_sac_actor(
+                agent.actor,
+                config.env.is_discrete,
+                config.env.is_diff_drive,
+                f"../../../../../model/{config.env.env_name}",
+            )
+            agent = agent._replace(actor=actor)
 
         action_scale = None
         action_bias = None
@@ -63,10 +72,7 @@ def main(config):
         # target_entropy = -action_space.n/2
         learner = Learner.remote(
             buffer,
-            actor,
-            critic,
-            target_critic,
-            temp,
+            agent,
             action_scale,
             action_bias,
             target_entropy,
@@ -76,21 +82,23 @@ def main(config):
         rollout_worker = RolloutWorker.remote(
             buffer,
             learner,
-            actor,
+            agent.actor,
             env.instance,
+            config.model.name,
             config.seed,
         )
         rollout_worker.run.remote()
         evaluator = Evaluator.remote(
             learner,
-            actor,
+            agent.actor,
             env.instance,
+            config.model.name,
             config.seed,
         )
         evaluator.run.remote()
 
         data_num = 0
-        while data_num < config.train.batch_size:
+        while data_num < 10000:
             time.sleep(1)
             data_num = ray.get(ray.get(buffer.num_data.remote()))
 
@@ -120,9 +128,9 @@ def main(config):
         evaluator.evaluate.remote(config.train.eval_iters)
         done = False
 
-        while not done:
-            done = ray.get(evaluator.is_eval_done.remote())
-            time.sleep(0.5)
+        # while not done:
+        #     done = ray.get(evaluator.is_eval_done.remote())
+        #     time.sleep(0.5)
 
         ray.kill(rollout_worker)
         ray.kill(evaluator)

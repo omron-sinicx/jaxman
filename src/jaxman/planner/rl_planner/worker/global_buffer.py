@@ -9,12 +9,13 @@ import time
 from typing import Union
 
 import jax
+import numpy as np
 import ray
 from gym.spaces import Box, Dict, Discrete
 from omegaconf.dictconfig import DictConfig
 
 from ..memory.dataset import Buffer, Experience, TrainBatch
-from ..memory.utils import _push_experience_to_buffer, _sample_experience
+from ..memory.utils import _build_push_experience_to_buffer, _build_sample_experience
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
@@ -36,12 +37,20 @@ class GlobalBuffer(Buffer):
         super().__init__(
             observation_space,
             action_space,
-            config.capacity,
+            config.train.capacity,
         )
 
-        self.batch_size = config.batch_size
+        self.batch_size = config.train.batch_size
         self.frame = 0
         self.batched_data = []
+
+        self._push_experience_to_buffer = _build_push_experience_to_buffer(
+            config.train.gamma,
+            config.train.use_k_step_learning,
+            config.train.k,
+            config.env.timeout,
+        )
+        self._sample_train_batch = _build_sample_experience(config.train)
 
         self.key = jax.random.PRNGKey(0)
         self.lock = threading.Lock()
@@ -72,7 +81,7 @@ class GlobalBuffer(Buffer):
         """
         while True:
             if len(self.batched_data) <= 10:
-                data = self._sample_batch(self.batch_size)
+                data = self._sample_batch()
                 data_id = ray.put(data)
                 self.batched_data.append(data_id)
             else:
@@ -84,7 +93,7 @@ class GlobalBuffer(Buffer):
         """
 
         if len(self.batched_data) == 0:
-            data = self._sample_batch(self.batch_size)
+            data = self._sample_batch()
             data_id = ray.put(data)
             return data_id
         else:
@@ -98,20 +107,34 @@ class GlobalBuffer(Buffer):
             experience (Experience): rollout episode experience
         """
         with self.lock:
-            _push_experience_to_buffer(self, experience)
+            self._push_experience_to_buffer(self, experience)
             del experience
 
-    def _sample_batch(self, batch_size: int) -> TrainBatch:
+    def _sample_batch(self) -> TrainBatch:
         """
         sample batched data
-
-        Args:
-            batch_size (int): size of batch
 
         Returns:
             TrainBatch: sampled batch data
         """
         with self.lock:
-            data = _sample_experience(self, batch_size, self.num_agents, self.comm_dim)
+            self.key, data = self._sample_train_batch(
+                self.key,
+                self,
+                self.num_agents,
+                self.comm_dim,
+                self.num_items,
+                self.item_dim,
+            )
             self.frame += 1
             return data
+
+    def update_priority(self, index, priority):
+        """
+        add rollout episode experience to buffer
+
+        Args:
+            experience (Experience): rollout episode experience
+        """
+        with self.lock:
+            np.put(self.priority, index, priority)

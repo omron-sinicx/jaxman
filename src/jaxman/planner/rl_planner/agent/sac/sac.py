@@ -5,16 +5,19 @@ Affiliation: OMRON SINIC X / University of Tokyo
 """
 
 from functools import partial
-from typing import Dict, Tuple, Union
+from typing import Callable, Dict, NamedTuple, Tuple, Union
 
 import jax
 import jax.numpy as jnp
-from chex import PRNGKey
+from chex import Array, PRNGKey
+from flax.core.frozen_dict import FrozenDict
 from flax.training import checkpoints
 from flax.training.train_state import TrainState
 from gym.spaces import Box, Dict, Discrete
+from jaxman.env import AgentObservation
 from jaxman.planner.rl_planner.memory.dataset import TrainBatch
 from omegaconf import DictConfig
+from tensorflow_probability.substrates import jax as tfp
 
 from .actor import create_actor
 from .actor import update as update_actor
@@ -24,13 +27,22 @@ from .critic import update_target_critic
 from .temperature import create_temp
 from .temperature import update as update_temperature
 
+tfd = tfp.distributions
+
+
+class SAC(NamedTuple):
+    actor: TrainState
+    critic: TrainState
+    target_network: TrainState
+    temperature: TrainState
+
 
 def create_sac_agent(
     observation_space: Dict,
     action_space: Union[Box, Discrete],
     model_config: DictConfig,
     key: PRNGKey,
-) -> Tuple[TrainState, TrainState, TrainState, TrainState, PRNGKey]:
+) -> Tuple[SAC, PRNGKey]:
     """create sac agent
 
     Args:
@@ -40,7 +52,7 @@ def create_sac_agent(
         key (PRNGKey): random variable key
 
     Returns:
-        Tuple[TrainState,TrainState,TrainState,TrainState,PRNGKey]: SAC agent and key
+        Tuple[SAC,PRNGKey]: SAC agent and key
     """
     key, actor_key, critic_key, temp_key = jax.random.split(key, 4)
     actor = create_actor(observation_space, action_space, model_config, actor_key)
@@ -49,7 +61,8 @@ def create_sac_agent(
         observation_space, action_space, model_config, critic_key
     )
     temp = create_temp(model_config, temp_key)
-    return actor, critic, target_critic, temp, key
+    sac = SAC(actor, critic, target_critic, temp)
+    return sac, key
 
 
 def restore_sac_actor(
@@ -101,10 +114,7 @@ def restore_sac_actor(
 )
 def _update_sac_jit(
     key: PRNGKey,
-    actor: TrainState,
-    critic: TrainState,
-    target_critic: TrainState,
-    temp: TrainState,
+    sac: SAC,
     batch: TrainBatch,
     gamma: float,
     tau: float,
@@ -113,16 +123,13 @@ def _update_sac_jit(
     auto_temp_tuning: bool,
     update_target: bool,
     train_actor: bool,
-) -> Tuple[PRNGKey, TrainState, TrainState, TrainState, TrainState, Dict]:
+) -> Tuple[PRNGKey, SAC, Array, Dict]:
     """
     update SAC agent network
 
     Args:
         key (PRNGKey): random varDable key
-        actor (TrainState): TrainState of actor
-        critic (TrainState): TrainState of critic
-        target_critic (TrainState): TrainState of target_critic
-        temp (TrainState): TrainState of temperature
+        sac (SAC): Namedtuple stores sac agent TrainState
         batch (TrainBatch): Train Batch
         gamma (float): gamma. decay rate
         tau (float): tau. target critic update rate
@@ -139,43 +146,84 @@ def _update_sac_jit(
     key, subkey = jax.random.split(key)
     new_critic, critic_info = update_critic(
         subkey,
-        actor,
-        critic,
-        target_critic,
-        temp,
+        sac.actor,
+        sac.critic,
+        sac.target_network,
+        sac.temperature,
         batch,
         gamma,
         is_discrete,
     )
     if update_target:
-        new_target_critic = update_target_critic(new_critic, target_critic, tau)
+        new_target_critic = update_target_critic(new_critic, sac.target_network, tau)
     else:
-        new_target_critic = target_critic
+        new_target_critic = sac.target_network
 
     if train_actor:
         key, subkey = jax.random.split(key)
         new_actor, actor_info = update_actor(
-            subkey, actor, new_critic, temp, batch, is_discrete
+            subkey, sac.actor, new_critic, sac.temperature, batch, is_discrete
         )
         if auto_temp_tuning:
             new_temp, alpha_info = update_temperature(
-                temp, actor_info["entropy"], target_entropy
+                sac.temperature, actor_info["entropy"], target_entropy
             )
         else:
-            new_temp = temp
-            alpha = jnp.exp(temp.params["log_temp"]).astype(float)
+            new_temp = sac.temperature
+            alpha = jnp.exp(sac.temperature.params["log_temp"]).astype(float)
             alpha_info = {"temperature": alpha}
+        actor_info.update(entropy=actor_info["entropy"].mean())
     else:
-        new_actor = actor
+        new_actor = sac.actor
         actor_info = {}
-        new_temp = temp
+        new_temp = sac.temperature
         alpha_info = {}
+    new_sac = SAC(new_actor, new_critic, new_target_critic, new_temp)
 
     return (
         key,
-        new_actor,
-        new_critic,
-        new_target_critic,
-        new_temp,
+        new_sac,
+        jnp.ones((batch.actions.shape[0],)),
         {**critic_info, **actor_info, **alpha_info},
     )
+
+
+def build_sample_action(actor_fn: Callable, is_discrete: bool, evaluate: bool):
+    def sample_action(
+        params: FrozenDict,
+        observations: AgentObservation,
+        key: PRNGKey,
+    ) -> Tuple[PRNGKey, Array]:
+        """sample agent action
+
+        Args:
+            params (FrozenDict): agent parameter
+            observations (Array): agent observatoin
+            key (PRNGKey): random key variable
+
+        Returns:
+            Tuple[PRNGKey, Array]: new key, sampled action
+        """
+        obs = observations.split_observation()
+        if evaluate:
+            if is_discrete:
+                action_probs = actor_fn({"params": params}, obs)
+                actions = jnp.argmax(action_probs, axis=-1)
+            else:
+                means, log_stds = actor_fn({"params": params}, obs)
+                actions = means
+        else:
+            if is_discrete:
+                action_probs = actor_fn({"params": params}, obs)
+                action_dist = tfd.Categorical(probs=action_probs)
+            else:
+                means, log_stds = actor_fn({"params": params}, obs)
+                action_dist = tfd.MultivariateNormalDiag(
+                    loc=means, scale_diag=jnp.exp(log_stds)
+                )
+
+            subkey, key = jax.random.split(key)
+            actions = action_dist.sample(seed=subkey)
+        return key, actions
+
+    return jax.jit(sample_action)

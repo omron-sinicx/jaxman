@@ -10,9 +10,25 @@ from typing import Callable
 import jax
 import jax.numpy as jnp
 from chex import Array, dataclass
+from jaxman.env import AgentInfo, AgentState, EnvInfo, TaskInfo
+from jaxman.env.kinematic_dynamics import (
+    _build_compute_next_state,
+    _get_agent_dist,
+    _get_obstacle_dist,
+)
 from jaxman.utils import standardize
 
-from ..env.core import AgentInfo, AgentState, TaskInfo
+
+def create_planner(env_info: EnvInfo, agent_info: AgentInfo):
+    _compute_next_state = _build_compute_next_state(
+        env_info.is_discrete, env_info.is_diff_drive
+    )
+    return DWAPlanner(
+        compute_next_state=_compute_next_state,
+        get_obstacle_dist=_get_obstacle_dist,
+        get_agent_dist=_get_agent_dist,
+        agent_info=agent_info,
+    )
 
 
 @dataclass
