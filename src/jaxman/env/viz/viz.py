@@ -51,6 +51,7 @@ def render_map(
 def render_gif(
     state_traj: Array,
     item_traj: Array,
+    goal_traj: Array,
     rads: Array,
     task_info: TaskInfo = None,
     trial_info: TrialInfo = None,
@@ -69,7 +70,7 @@ def render_gif(
             goals = task_info.goals
         else:
             state = State.from_array(state_traj[t], item_traj[t])
-            goals = task_info.item_goals
+            goals = goal_traj[t]
         if dones is not None:
             done = dones[t]
         else:

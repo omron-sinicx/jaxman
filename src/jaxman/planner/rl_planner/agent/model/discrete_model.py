@@ -153,3 +153,38 @@ class MultiHeadCritic(fnn.Module):
         )
 
         return q
+
+
+class MaxMinCritic(fnn.Module):
+    hidden_dim: int
+    msg_dim: int
+    action_dim: int
+    use_dueling_net: bool
+    N: int
+
+    @fnn.compact
+    def __call__(self, observations: AgentObservation) -> Array:
+        """
+        critic for Maxmin Q learning
+
+        Args:
+            observations (AgentObservation): NamedTuple for observation of agent. consisting of basic observations and communication
+
+        Returns:
+            Array: Q value for N networks. shape: (Batch_size, N, action_dim)
+        """
+        VmapCritic = fnn.vmap(
+            Critic,
+            variable_axes={"params": 0},
+            split_rngs={"params": True},
+            in_axes=None,
+            out_axes=1,
+            axis_size=self.N,
+        )
+        qs = VmapCritic(
+            self.hidden_dim, self.msg_dim, self.action_dim, self.use_dueling_net
+        )(
+            observations,
+        )
+
+        return qs

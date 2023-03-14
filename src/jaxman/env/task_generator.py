@@ -71,6 +71,7 @@ def sample_valid_start_goal(
         "sample_type",
         "is_discrete",
         "is_diff_drive",
+        "is_biased_sample",
     ),
 )
 def sample_valid_agent_item_pos(
@@ -83,6 +84,7 @@ def sample_valid_agent_item_pos(
     is_diff_drive: bool,
     no_overlap: bool = True,
     sample_type: str = "uniform",
+    is_biased_sample: bool = False,
     num_max_trials: int = 200,
 ) -> tuple[Array, Array, Array]:
     """
@@ -113,6 +115,7 @@ def sample_valid_agent_item_pos(
         is_discrete,
         no_overlap,
         sample_type,
+        is_biased_sample,
         num_max_trials,
     )
     agent_start_rots = sample_start_rots(

@@ -8,8 +8,7 @@ from typing import Callable, NamedTuple, Tuple
 
 import jax
 import jax.numpy as jnp
-from chex import Array
-from jaxman.utils import compute_distance
+from chex import Array, PRNGKey
 
 from ..core import AgentInfo, AgentState, EnvInfo
 from ..kinematic_dynamics import (
@@ -34,7 +33,6 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         Callable: jit-compiled observe function
     """
     is_discrete = env_info.is_discrete
-    num_agents = env_info.num_agents
     is_crashable = env_info.is_crashable
     _compute_next_state = _build_compute_next_env_state(env_info, agent_info)
     _check_collision_wiht_agents = _build_check_collision_with_agents(
@@ -47,10 +45,15 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
     _compute_is_item_solved = _build_compute_is_solved(is_discrete, agent_info)
     _check_is_item_collided = _build_check_is_item_collided(env_info, agent_info)
     _compute_rew_done_info = _build_compute_rew_done_info(env_info)
+    _respawn_items = _build_respawn_items(env_info)
 
     def _inner_step(
-        state: State, actions: Array, task_info: TaskInfo, trial_info: TrialInfo
-    ) -> Tuple[State, Array, Array, TrialInfo]:
+        key: PRNGKey,
+        state: State,
+        actions: Array,
+        task_info: TaskInfo,
+        trial_info: TrialInfo,
+    ) -> Tuple[PRNGKey, State, Array, Array, TaskInfo, TrialInfo]:
         """inner step function. inner step function consisting of the following steps:
         1) compute next state by agent's movement action (don't consider load/unload action)
         2) update agent and item state by agent's load/unload action
@@ -59,6 +62,7 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         5) create return vals
 
         Args:
+            key (PRNGKey): random variable key
             state (State): current agent and item state
             actions (Array): actions
             task_info (TaskInfo): task information
@@ -88,7 +92,7 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         )
 
         # update item trial_info
-        solved = _compute_is_item_solved(
+        item_solved = _compute_is_item_solved(
             possible_next_state.item_pos, task_info.item_goals
         )
         item_collided = _check_is_item_collided(possible_next_state, agent_collided)
@@ -98,8 +102,7 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
             possible_next_state,
             agent_collided * is_crashable,
             item_collided * is_crashable,
-            solved,
-            task_info,
+            item_solved,
             trial_info,
         )
 
@@ -109,26 +112,26 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         ang = possible_next_state.agent_state.ang * not_finished_agents
         new_agent_state = possible_next_state.agent_state._replace(vel=vel, ang=ang)
 
-        if not is_crashable:
-            new_agent_state = AgentState.from_array(
-                (
-                    state.agent_state.cat() * agent_collided.reshape(num_agents, -1)
-                    + new_agent_state.cat()
-                    * jnp.logical_not(agent_collided).reshape(num_agents, -1)
-                ).astype(int)
-            )
-
         # if item finish episode, set item position to INF
-        done_item = jnp.logical_or(item_collided * is_crashable, solved)
+        done_item = jnp.logical_or(item_collided * is_crashable, item_solved)
+
         item_pos = jax.vmap(lambda pos, done: pos + done * INF)(
-            possible_next_state.item_pos, done_item
+            possible_next_state.item_pos, done_item.astype(bool)
         )
+
+        item_time = possible_next_state.item_time * jnp.logical_not(done_item)
 
         next_state = possible_next_state._replace(
-            agent_state=new_agent_state, item_pos=item_pos
+            agent_state=new_agent_state, item_pos=item_pos, item_time=item_time
         )
 
-        return next_state, rews, done, new_trial_info
+        # respawn items
+        if env_info.is_respawn:
+            key, next_state, task_info = _respawn_items(
+                key, next_state, task_info, done_item.astype(bool)
+            )
+
+        return key, next_state, rews, done, task_info, new_trial_info
 
     return jax.jit(_inner_step)
 
@@ -150,12 +153,18 @@ def _build_compute_next_env_state(env_info: EnvInfo, agent_info: AgentInfo) -> C
         state: State, actions: Array, task_info: TaskInfo
     ) -> State:
         next_agent_state = _compute_agent_next_state(
-            state.agent_state, actions, agent_info
+            state, actions, agent_info, task_info
         )
         next_load_item_id, next_item_pos = _compute_next_item_state(
             next_agent_state, actions, state.load_item_id, state.item_pos, task_info
         )
-        return State(next_agent_state, next_load_item_id, next_item_pos)
+        is_load_item = next_load_item_id < env_info.num_items
+        life = state.life - is_load_item + jnp.logical_not(is_load_item)
+        life = jnp.clip(life, a_min=-1, a_max=5)
+        item_time = state.item_time + 1
+        return State(
+            next_agent_state, next_load_item_id, life, next_item_pos, item_time
+        )
 
     return jax.jit(_compute_next_env_state)
 
@@ -198,14 +207,62 @@ def _build_compute_next_agent_state(env_info: EnvInfo) -> Callable:
             arrayed_next_state = arrayed_next_state.astype(int)
         return AgentState.from_array(arrayed_next_state)
 
-    def _compute_agent_next_state(state: AgentState, actions: Array, agent_info):
-        possible_next_state = jax.vmap(_compute_next_state)(state, actions, agent_info)
+    def _compute_agent_next_state(
+        state: State, actions: Array, agent_info: AgentInfo, task_info: TaskInfo
+    ) -> AgentState:
+        possible_next_state = jax.vmap(_compute_next_state)(
+            state.agent_state, actions, agent_info
+        )
         next_state = jax.vmap(_apply_load_or_unload)(
-            state, possible_next_state, actions
+            state.agent_state, possible_next_state, actions
         )
         return next_state
 
-    return jax.jit(_compute_agent_next_state)
+    def _compute_non_crashable_next_state(
+        state: State, action: Array, agent_info: AgentInfo, task_info: TaskInfo
+    ) -> AgentState:
+        class Carry(NamedTuple):
+            state: Array
+            agent_obs_item_map: Array
+            collided: Array
+
+        def _inner_step(i: int, carry: Carry):
+            next_state = _compute_next_state(
+                AgentState.from_array(carry.state[i]), action[i], agent_info.at(i)
+            )
+
+            next_pos = next_state.pos
+            is_move_action = action[i] < 5
+            is_collide = jnp.array(
+                carry.agent_obs_item_map[next_pos[0], next_pos[1]], dtype=bool
+            )
+            can_move = jnp.logical_and(is_move_action, jnp.logical_not(is_collide))
+
+            next_state = can_move * next_state.cat() + ~can_move * carry.state[i]
+
+            state = carry.state.at[i].set(next_state)
+            agent_obs_item_map = carry.agent_obs_item_map.at[
+                next_state[0], next_state[1]
+            ].set(1)
+            collided = carry.collided.at[i].set(is_collide)
+            return Carry(state, agent_obs_item_map, collided)
+
+        agent_obs_item_map = jnp.sum(
+            jax.vmap(
+                lambda pos, map: map.at[pos[0], pos[1]].set(1.0),
+                in_axes=(0, None),
+            )(state.item_pos, task_info.obs.occupancy),
+            axis=0,
+        )
+        is_collided = jnp.zeros((env_info.num_agents,))
+        carry = Carry(state.agent_state.cat(), agent_obs_item_map, is_collided)
+        carry = jax.lax.fori_loop(0, env_info.num_agents, _inner_step, carry)
+        return AgentState.from_array(carry.state)
+
+    if env_info.is_crashable:
+        return jax.jit(_compute_agent_next_state)
+    else:
+        return jax.jit(_compute_non_crashable_next_state)
 
 
 def _build_compute_next_item_state(
@@ -381,7 +438,7 @@ def _build_check_is_item_collided(env_info: EnvInfo, agent_info: AgentInfo):
     """check whether item is collided
 
     Args:
-        is_discrete (bool): is_discrete
+        env_info (EnvInfo): environment base information
         agent_info (AgentInfo): agent kinematic information
 
     Steps:
@@ -450,6 +507,8 @@ def _build_compute_is_solved(is_discrete: bool, agent_info: AgentInfo):
 def _build_compute_rew_done_info(env_info: EnvInfo):
     num_items = env_info.num_items
     agent_index = jnp.arange(env_info.num_agents)
+    decay_duration = env_info.decay_end - env_info.decay_start
+    decay_scale = 1 - env_info.min_reward
 
     def _compute_rew_done_info(
         old_state: State,
@@ -457,14 +516,39 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
         agent_collided: Array,
         item_collided: Array,
         solved: Array,
-        task_info: TaskInfo,
         trial_info: TrialInfo,
     ) -> Tuple[Array, Array, TrialInfo]:
+        def _compute_solve_rew(
+            old_state: State, old_trial_info: TrialInfo, new_trial_info: TrialInfo
+        ):
+            old_load_item_id = old_state.load_item_id[agent_index]
+            is_load_item = old_load_item_id < num_items
+
+            # item solve reward
+            solved = (
+                new_trial_info.solved[old_load_item_id]
+                - old_trial_info.solved[old_load_item_id]
+            )
+
+            if env_info.is_decay_reward:
+                solve_rew = jnp.clip(
+                    1
+                    - decay_scale
+                    * (state.item_time[old_load_item_id] - env_info.decay_start)
+                    / decay_duration,
+                    a_min=env_info.min_reward,
+                    a_max=1,
+                )
+                solve_rew = solved * solve_rew * is_load_item
+            else:
+                solve_rew = solved * env_info.goal_reward * is_load_item
+
+            return solve_rew
+
         def _compute_rew(
             agent_index: Array,
             old_state: State,
             state: State,
-            task_info: TaskInfo,
             old_trial_info: TrialInfo,
             new_trial_info: TrialInfo,
         ) -> Array:
@@ -480,64 +564,29 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
             Returns:
                 Array: reward for one agent
             """
-            old_load_item_id = old_state.load_item_id[agent_index]
-            is_load_item = old_load_item_id < num_items
+            solve_rew = _compute_solve_rew(old_state, old_trial_info, new_trial_info)[0]
 
-            # item solve reward
-            solved = new_trial_info.solved[old_load_item_id]
-            solve_rew = solved * env_info.goal_reward * is_load_item
-
-            # item distance reward
-            old_distance = compute_distance(
-                task_info.item_goals[old_load_item_id],
-                old_state.agent_state.pos[agent_index],
-            )
-            current_distance = compute_distance(
-                task_info.item_goals[old_load_item_id],
-                state.agent_state.pos[agent_index],
-            )
-            dist_rew = (
-                (old_distance - current_distance) * env_info.dist_reward * is_load_item
-            )
-
-            # collide penalty
-            crash_penalty = (
-                new_trial_info.agent_collided[agent_index] * env_info.crash_penalty
-            )
-
-            # dont hold item penalty
-            load_item_id = state.load_item_id[agent_index]
-            is_load_item_new = load_item_id < num_items
-            dont_hold_item_penalty = (
-                jnp.logical_not(is_load_item_new) * env_info.dont_hold_item_penalty
-            )
-
-            # reward ofr pick up item
-            pickup_reward = (
-                is_load_item_new
-                * jnp.logical_not(is_load_item)
-                * env_info.pickup_reward
-            )
+            # life penalty
+            is_life_end = state.life[agent_index] < 0
+            life_penalty = is_life_end * env_info.life_penalty
 
             not_finished = jnp.logical_not(old_trial_info.agent_collided[agent_index])
-            return (
-                solve_rew
-                + dist_rew
-                + crash_penalty
-                + dont_hold_item_penalty
-                + pickup_reward
-            ) * not_finished
+            return (solve_rew + life_penalty) * not_finished
 
         agent_collided = jnp.logical_or(agent_collided, trial_info.agent_collided)
         item_collided = jnp.logical_or(item_collided, trial_info.item_collided)
 
         # goal check
-        solved = jnp.logical_or(trial_info.solved, solved.flatten())
+        solved = trial_info.solved + solved.flatten().astype(int)
         solved_time = (
             jnp.minimum(trial_info.solved_time, solved * trial_info.timesteps)
             + (~solved) * jnp.inf
         )
-        is_success = jnp.all(solved)
+        # is_success = jnp.all(solved)
+        is_success = False
+
+        # excess movement
+        excess_move = trial_info.excess_move + (state.life < 0).flatten().astype(int)
 
         # calculate indicator
         delivery_rate = jnp.sum(solved) / env_info.num_agents
@@ -556,6 +605,7 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
             timesteps=timesteps,
             agent_collided=agent_collided,
             item_collided=item_collided,
+            excess_move=excess_move,
             solved=solved,
             solved_time=solved_time,
             timeout=timeout,
@@ -567,8 +617,8 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
             is_success=is_success,
         )
 
-        rews = jax.vmap(_compute_rew, in_axes=(0, None, None, None, None, None))(
-            agent_index, old_state, state, task_info, trial_info, new_trial_info
+        rews = jax.vmap(_compute_rew, in_axes=(0, None, None, None, None))(
+            agent_index, old_state, state, trial_info, new_trial_info
         )
 
         # compute done
@@ -581,3 +631,151 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
         return rews, done, new_trial_info
 
     return jax.jit(_compute_rew_done_info)
+
+
+def _build_respawn_items(env_info: EnvInfo) -> Callable:
+    """respawn finished items
+
+    Args:
+        env_info (EnvInfo): environment base information
+
+    Returns:
+        Callable: jit-compiled respawn function
+    """
+    num_items = env_info.num_items
+    map_size = env_info.occupancy_map.shape[0]
+    is_biased_sample = env_info.is_biased_sample
+    biased_mask = (jnp.arange(map_size**2) < (map_size**2 / 2)).astype(bool)
+
+    class Carry(NamedTuple):
+        key: jax.random.PRNGKey
+        item_pos: Array
+        item_goal: Array
+        agent_item_obs_map: Array
+        done: Array
+
+    def _body_func(i: int, carry: Carry) -> Carry:
+        """body function for jax.lax.fori_loop
+
+        Args:
+            i (int): loop index
+            carry (Carry): information carrier
+
+        Returns:
+            Carry: updated information carrier
+        """
+
+        def _pass(
+            key: PRNGKey,
+            all_item_pos: Array,
+            all_item_goal: Array,
+            agent_item_obs_map: Array,
+        ) -> Tuple[PRNGKey, Array, Array, Array]:
+            """
+            Pass function used for unfinished items.
+            This function is an identity map and returns the unchanged input.
+            """
+            return key, all_item_pos, all_item_goal, agent_item_obs_map
+
+        def _sample(
+            key: PRNGKey,
+            all_item_pos: Array,
+            all_item_goal: Array,
+            agent_item_obs_map: Array,
+        ) -> Tuple[PRNGKey, Array, Array, Array]:
+            """
+            sample item start and goal.
+            The item is sampled so that there is no overlap with the location of obstacles, agents, or items.
+            uppper index respawning item need to consider lower index respawned item positions
+
+            Args:
+                key (PRNGKey): random variable key
+                all_item_pos (Array): all item positions (this is updated by lower index item respawn)
+                all_item_goal (Array): all item goals (this is updated by lower index item respawn)
+                agent_item_obs_map (Array): occupancy map considering obstacles, agents, and item locations (this is updated by lower index item respawn)
+
+            Returns:
+                Tuple[key,Array, Array, Array]: key, updated_item_pos, updated_item_goal, update_occupancy_map
+            """
+            key, subkey = jax.random.split(key)
+            sample_prob = 1 - agent_item_obs_map.reshape(-1)
+            sample_prob = sample_prob / jnp.sum(sample_prob)
+
+            if is_biased_sample:
+                start_prob = sample_prob + sample_prob * biased_mask * 10
+                start_prob = start_prob / jnp.sum(start_prob)
+                item_start = jax.random.choice(
+                    subkey, map_size**2, shape=(1,), replace=False, p=start_prob
+                )[0]
+
+                goal_prob = sample_prob + sample_prob * (1 - biased_mask) * 10
+                goal_prob = goal_prob / jnp.sum(goal_prob)
+                item_goal = jax.random.choice(
+                    subkey, map_size**2, shape=(1,), replace=False, p=goal_prob
+                )[0]
+            else:
+                item_start, item_goal = jax.random.choice(
+                    subkey, map_size**2, shape=(2,), replace=False, p=sample_prob
+                )
+            item_start = jnp.array(
+                [(item_start / map_size).astype(int), item_start % map_size]
+            )
+            item_goal = jnp.array(
+                [(item_goal / map_size).astype(int), item_goal % map_size]
+            )
+            all_item_pos = all_item_pos.at[i].set(item_start)
+            all_item_goal = all_item_goal.at[i].set(item_goal)
+            agent_item_obs_map = (
+                agent_item_obs_map.at[item_start[0], item_start[1]]
+                .set(1)
+                .at[item_start[0], item_start[1] - 1]
+                .set(1)
+            )
+            return key, all_item_pos, all_item_goal, agent_item_obs_map
+
+        key, item_pos, item_goal, agent_item_obs_map = jax.lax.cond(
+            carry.done[i].astype(bool),
+            _sample,
+            _pass,
+            carry.key,
+            carry.item_pos,
+            carry.item_goal,
+            carry.agent_item_obs_map,
+        )
+        return Carry(key, item_pos, item_goal, agent_item_obs_map, carry.done)
+
+    def _respawn_item(
+        key: PRNGKey, state: State, task_info: TaskInfo, item_done: Array
+    ) -> Tuple[PRNGKey, State, TaskInfo]:
+        """respawn item start and goal
+
+        Args:
+            key (PRNGKey): random variable
+            state (State): current environment state
+            task_info (TaskInfo): current task information
+            item_done (Array): item done. respawn for done=True item
+
+        Returns:
+            Tuple[PRNGKey, State, TaskInfo]: new_key, updated_env_state, updated_task_information
+        """
+        pos = jnp.vstack((state.agent_state.pos, state.item_pos))
+        agent_item_obs_map = jnp.sum(
+            jax.vmap(
+                lambda pos, map: map.at[pos[0], pos[1]].set(1.0),
+                in_axes=(0, None),
+            )(pos, task_info.obs.occupancy),
+            axis=0,
+        )
+        b = agent_item_obs_map[:, 1:] + agent_item_obs_map[:, :-1]
+        agent_item_obs_map = (
+            agent_item_obs_map.at[:, :-1].set(b).astype(bool).astype(int)
+        )
+        carry = Carry(
+            key, state.item_pos, task_info.item_goals, agent_item_obs_map, item_done
+        )
+        carry = jax.lax.fori_loop(0, num_items, _body_func, carry)
+        state = state._replace(item_pos=carry.item_pos)
+        task_info = task_info._replace(item_goals=carry.item_goal)
+        return carry.key, state, task_info
+
+    return jax.jit(_respawn_item)

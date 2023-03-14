@@ -9,7 +9,7 @@ from typing import Dict, Tuple
 
 import jax
 import jax.numpy as jnp
-from chex import Array, assert_shape
+from chex import Array, PRNGKey, assert_shape
 from flax.core.frozen_dict import FrozenDict
 from flax.training.train_state import TrainState
 from jaxman.planner.rl_planner.memory.dataset import TrainBatch
@@ -23,36 +23,44 @@ tfb = tfp.bijectors
     jax.jit,
     static_argnames=(
         "is_pal",
+        "use_maxmin_dqn",
+        "N",
         "use_ddqn",
         "use_k_step_learning",
     ),
 )
 def update(
+    key: PRNGKey,
     actor: TrainState,
     target_actor: TrainState,
     batch: TrainBatch,
     gamma: float,
     is_pal: bool,
     alpha: float,
+    use_maxmin_dqn: bool,
+    N: int,
     use_ddqn: bool,
     use_k_step_learning: bool,
     k: int,
-) -> Tuple[TrainState, Dict]:
-    """update critic
+) -> Tuple[TrainState, Array, Dict]:
+    """update dqn_actor
 
     Args:
+        key (PRNGkey): random variable key
         actor (TrainState): TrainState of actor
         target_actor (TrainState): TrainState of target_actor
         batch (TrainBatch): train batch
         gamma (float): decay rate
         is_pal (bool): whether to use persistent advantage laerning or not
         alpha (float): weight of action gap used for persistent advantage learning
+        use_maxmin_dqn (bool): whether to use Maxmin Q-Learning
+        N (int): number of networks for Maxmin Q-Learning
         use_ddqn (bool): whether to use double dqn
         use_k_step_learning (bool): whether to use k step learning
         k (int): k for multi step learning
 
     Returns:
-        Tuple[TrainState, InfoDict, Array]: TrainState of updated critic, loss indicators
+        Tuple[TrainState, Array, Dict]: TrainState of updated dqn_actor, priority, loss indicators
     """
 
     def discrete_loss_fn(params: FrozenDict) -> Array:
@@ -62,7 +70,8 @@ def update(
             {"params": target_actor.params},
             batch.next_observations,
         )
-
+        if use_maxmin_dqn:
+            next_q = jnp.min(next_q, axis=1)
         if use_ddqn:
             next_action = jnp.argmax(
                 actor.apply_fn(
@@ -108,12 +117,18 @@ def update(
             target_q = target_q - alpha * jnp.minimum(action_gap, next_action_gap)
 
         q_values = actor.apply_fn({"params": params}, batch.observations)
-        q_value = jax.vmap(lambda q_values, i: q_values[i])(q_values, batch.actions)
-
+        if use_maxmin_dqn:
+            subnet_id = jax.random.choice(key, N, shape=(1,))
+            q_value = jax.vmap(
+                lambda q_values, i, k: q_values[k, i], in_axes=[0, 0, None]
+            )(q_values, batch.actions, subnet_id)
+        else:
+            q_value = jax.vmap(lambda q_values, i: q_values[i], in_axes=[0, 0])(
+                q_values, batch.actions
+            )
         td_error = q_value.reshape(batch_size) - target_q
         critic_loss = td_error**2
-        assert_shape(critic_loss, (batch_size,))
-        weight_critic_loss = critic_loss * batch.weight
+        weight_critic_loss = critic_loss
 
         # for evaluation
         prob = jax.nn.softmax(q_values) + 1e-10

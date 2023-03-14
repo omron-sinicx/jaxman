@@ -136,6 +136,9 @@ def _build_push_experience_to_buffer(
 def _build_sample_experience(
     train_config: DictConfig,
 ):
+    batch_size = train_config.batch_size
+    success_step_ratio = train_config.success_step_ratio
+
     def _build_sample_index(
         use_per: bool,
     ):
@@ -152,7 +155,7 @@ def _build_sample_experience(
             p = (p * (buffer_index < size)) ** train_config.per_alpha
             probs = p / jnp.sum(p)
             index = jax.random.choice(
-                subkey, train_config.capacity, shape=(train_config.batch_size,), p=probs
+                subkey, train_config.capacity, shape=(batch_size,), p=probs
             )
             probs = jax.vmap(lambda probs, idx: probs[idx], in_axes=(None, 0))(
                 probs, index
@@ -161,14 +164,23 @@ def _build_sample_experience(
             return index, weight, key
 
         def uniform_sample(key: PRNGKey, _, size: int):
-            index = np.random.randint(size, size=train_config.batch_size)
-            weight = np.ones((train_config.batch_size,))
+            index = np.random.randint(size, size=batch_size)
+            weight = np.ones((batch_size,))
             return index, weight, key
 
         if use_per:
             return per_sample
         else:
             return uniform_sample
+
+    def _success_sample(buffer: Buffer, size: int):
+        success_index = np.where(buffer.rewards > 0)[0]
+        if len(success_index) > 0:
+            index = np.random.randint(len(success_index), size=size)
+            index = success_index[index]
+        else:
+            index = np.random.randint(buffer.size, size=size)
+        return index
 
     def _batch_normalization(buffer: Buffer, sample_reward: np.array) -> np.array:
         """normalized reward and update reward mean and std
@@ -212,6 +224,13 @@ def _build_sample_experience(
         item_dim: int,
     ):
         index, weight, key = _sample_index(key, buffer.priority, buffer.size)
+        if train_config.use_separete_sample:
+            success_index = _success_sample(
+                buffer, int(batch_size * success_step_ratio)
+            )
+            success_weight = np.ones((int(batch_size * success_step_ratio),))
+            index = np.concatenate((index, success_index))
+            weight = np.concatenate((weight, success_weight))
 
         all_obs = buffer.observations[index]
         agent_obs = split_obs_and_comm(

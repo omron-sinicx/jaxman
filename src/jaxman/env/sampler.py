@@ -128,6 +128,7 @@ def sample_random_pos(
         "num_max_trials",
         "is_discrete",
         "sample_type",
+        "is_biased_sample",
     ),
 )
 def sample_random_agent_item_pos(
@@ -139,6 +140,7 @@ def sample_random_agent_item_pos(
     is_discrete: bool,
     no_overlap: bool = True,
     sample_type: str = "uniform",
+    is_biased_sample: bool = False,
     num_max_trials: bool = 200,
 ) -> Tuple[Array, Array]:
     """sample agent start and goal position
@@ -159,37 +161,36 @@ def sample_random_agent_item_pos(
     """
     start_key, goal_key = jax.random.split(key)
     max_rad = jnp.max(rads.flatten())
-    if sample_type == "uniform":
-        agent_item_starts_goals = sample_uniform(
-            start_key,
-            num_agents + num_items * 2,
-            max_rad,
-            obs,
-            is_discrete,
-            no_overlap,
-            num_max_trials,
-        )
-    else:
-        agent_item_starts_goals = sample_from_corner(
-            start_key,
-            num_agents + num_items * 2,
-            max_rad,
-            obs,
-            is_discrete,
-            "start",
-            no_overlap,
-            num_max_trials,
-        )
+    # if sample_type == "uniform":
+    agent_starts = sample_uniform(
+        start_key,
+        num_agents,
+        max_rad,
+        obs,
+        is_discrete,
+        no_overlap,
+        num_max_trials,
+    )
+    # else:
+    #     agent_item_starts_goals = sample_from_corner(
+    #         start_key,
+    #         num_agents + num_items * 2,
+    #         max_rad,
+    #         obs,
+    #         is_discrete,
+    #         "start",
+    #         no_overlap,
+    #         num_max_trials,
+    #     )
     if is_discrete:
         map_size = obs.sdf.shape[0]
-        agent_item_starts_goals = jnp.minimum(
-            (agent_item_starts_goals * map_size).astype(int), map_size - 1
+        agent_starts = jnp.minimum((agent_starts * map_size).astype(int), map_size - 1)
+        item_starts, item_goals = _sample_item(
+            key, agent_starts, obs.occupancy, num_items, map_size, is_biased_sample
         )
-    return (
-        agent_item_starts_goals[:num_agents],
-        agent_item_starts_goals[num_agents : (num_agents + num_items)],
-        agent_item_starts_goals[-num_items:],
-    )
+    else:
+        NotImplementedError
+    return agent_starts, item_starts, item_goals
 
 
 @partial(jax.jit, static_argnames=("num_samples", "num_max_trials", "is_discrete"))
@@ -518,3 +519,55 @@ def _build_target_pos(dist_type, pos_type, mean, sigma):
         return target_pos
 
     return sample_target_pos
+
+
+@partial(jax.jit, static_argnames=("num_items", "map_size", "is_biased_sample"))
+def _sample_item(
+    key: PRNGKey,
+    agent_pos: Array,
+    obs_map: Array,
+    num_items: int,
+    map_size: int,
+    is_biased_sample: bool,
+):
+    def _index_to_xy(item_pos, map_size):
+        return jnp.array([(item_pos / map_size).astype(int), item_pos % map_size])
+
+    agent_item_obs_map = jnp.sum(
+        jax.vmap(
+            lambda pos, map: map.at[pos[0], pos[1]].set(1.0),
+            in_axes=(0, None),
+        )(agent_pos, obs_map),
+        axis=0,
+    )
+    b = agent_item_obs_map[:, 1:] + agent_item_obs_map[:, :-1]
+    agent_item_obs_map = agent_item_obs_map.at[:, :-1].set(b).astype(bool).astype(int)
+    sample_prob = 1 - agent_item_obs_map.reshape(-1)
+    key, subkey = jax.random.split(key)
+    if is_biased_sample:
+        biased_mask = (jnp.arange(map_size**2) < (map_size**2 / 2)).astype(bool)
+
+        start_prob = sample_prob + sample_prob * biased_mask * 10
+        start_prob = start_prob / jnp.sum(start_prob)
+        item_start = jax.random.choice(
+            subkey, map_size**2, shape=(num_items,), replace=False, p=start_prob
+        )
+
+        goal_prob = sample_prob + sample_prob * (1 - biased_mask) * 10
+        goal_prob = goal_prob / jnp.sum(goal_prob)
+        item_goal = jax.random.choice(
+            subkey, map_size**2, shape=(num_items,), replace=False, p=goal_prob
+        )
+    else:
+        subkey1, subkey2 = jax.random.split(subkey)
+        sample_prob = sample_prob / jnp.sum(sample_prob)
+        item_start = jax.random.choice(
+            subkey1, map_size**2, shape=(num_items,), replace=False, p=sample_prob
+        )
+        item_goal = jax.random.choice(
+            subkey2, map_size**2, shape=(num_items,), replace=False, p=sample_prob
+        )
+
+    item_start = jax.vmap(_index_to_xy, in_axes=[0, None])(item_start, map_size)
+    item_goal = jax.vmap(_index_to_xy, in_axes=[0, None])(item_goal, map_size)
+    return item_start, item_goal

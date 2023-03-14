@@ -17,6 +17,7 @@ def setup():
     train_config = hydra.utils.instantiate(
         OmegaConf.load("scripts/config/train/sac.yaml")
     )
+    train_config.batch_size = 10
     sample_experience = _build_sample_experience(train_config)
     key = jax.random.PRNGKey(0)
     return key, env_config, sample_experience
@@ -28,7 +29,7 @@ def test_discrete_sac_update(setup):
     model_config = hydra.utils.instantiate(
         OmegaConf.load("scripts/config/model/sac.yaml")
     )
-    capacity = 1000
+    capacity = 100
 
     # Discrete Env
     config.is_discrete = True
@@ -103,25 +104,44 @@ def test_dqn_update(setup):
     )
     capacity = 1000
 
-    # Continuous Env
     config.is_discrete = True
     env = JaxMANEnv(config)
     obs_space = env.observation_space
     buffer = Buffer(obs_space, env.action_space, capacity)
     buffer.size = capacity
-    dqn, key = create_dqn_agent(obs_space, env.action_space, model_config, key)
 
-    # update
     key, data = sample_experience(
         key, buffer, obs_space["comm"].shape[0], obs_space["comm"].shape[1], 0, 0
     )
+
+    # update
+    dqn, key = create_dqn_agent(obs_space, env.action_space, model_config, key)
     results = _update_dqn_jit(
+        key,
         dqn,
         data,
         0.95,
         0.05,
         True,
         0.9,
+        False,
+        model_config.N,
+        True,
+        True,
+        4,
+    )
+
+    # update Maxmin DQN
+    results = _update_dqn_jit(
+        key,
+        dqn,
+        data,
+        0.95,
+        0.05,
+        True,
+        0.9,
+        False,
+        model_config.N,
         True,
         True,
         4,

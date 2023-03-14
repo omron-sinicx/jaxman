@@ -14,6 +14,7 @@ import numpy as np
 import ray
 from flax.training.train_state import TrainState
 from jaxman.env import Instance, TrialInfo
+from omegaconf import DictConfig
 
 from ..rollout.rollout import _build_rollout_episode
 from .global_buffer import GlobalBuffer
@@ -28,7 +29,7 @@ class RolloutWorker:
         learner: Learner,
         actor: TrainState,
         instance: Instance,
-        model_name: str,
+        model_config: DictConfig,
         seed: int = 0,
     ) -> None:
         """
@@ -39,14 +40,14 @@ class RolloutWorker:
             learner (Learner): learner. update agent parameters
             actor (TrainState): actor
             instance (Instance): envrironment instance
-            model_name (str): agent model name (sac or dqn)
+            model_config (DictConfig): model configuration
             seed (int, optional): seed. Defaults to 0
         """
         self.global_buffer = global_buffer
         self.learner = learner
         self.actor = actor
         self.instance = instance
-        self.model_name = model_name
+        self.model_config = model_config
 
         self.seed = seed
 
@@ -55,7 +56,7 @@ class RolloutWorker:
         self.last_counter = 0
 
         self._rollout_fn = _build_rollout_episode(
-            instance, actor.apply_fn, evaluate=False, model_name=model_name
+            instance, actor.apply_fn, evaluate=False, model_config=self.model_config
         )
 
     def run(self) -> None:
@@ -71,11 +72,10 @@ class RolloutWorker:
         """
         key = jax.random.PRNGKey(self.seed)
         actor_params = self.actor.params
-        train_actor = False
+        (actor_params, _, train_actor) = self._update_parameters()
 
         while True:
             # rollout episode
-            # time.sleep(0.1)
             time.sleep(0.01)
             key, subkey = jax.random.split(key)
             carry = self._rollout_fn(

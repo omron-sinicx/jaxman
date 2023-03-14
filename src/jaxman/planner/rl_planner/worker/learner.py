@@ -54,11 +54,15 @@ class Learner:
         self.batch_size = config.train.batch_size
         self.save_interval = int(config.train.save_interval)
         self.warmup_iters = config.train.warmup_iters
+        self.use_pretrained_model = config.train.use_pretrained_model
         self.is_pal = config.train.is_pal
         self.alpha = config.train.alpha
+        self.use_maxmin_dqn = config.model.use_maxmin_dqn
+        self.N = config.model.N
         self.use_ddqn = config.train.use_ddqn
         self.use_k_step_learning = config.train.use_k_step_learning
         self.k = config.train.k
+        self.use_per = config.train.use_per
 
         self.action_scale = action_scale
         self.action_bias = action_bias
@@ -68,7 +72,7 @@ class Learner:
         self.target_entropy = target_entropy
 
         self.done = False
-        self.train_actor = False
+        self.train_actor = (False) or self.use_pretrained_model
         self.counter = 0
         self.last_counter = 0
         self.loss = []
@@ -93,7 +97,7 @@ class Learner:
         key = jax.random.PRNGKey(self.seed)
         for i in range(self.horizon + 1):
             loss_info = {}
-            self.train_actor = i > self.warmup_iters
+            self.train_actor = (i > self.warmup_iters) or (self.use_pretrained_model)
             data = ray.get(ray.get(self.buffer.get_batched_data.remote()))
             # time.sleep(0.03)
             (key, self.agent, priority, loss_info,) = _update_jit(
@@ -108,6 +112,8 @@ class Learner:
                 True,  # carry.step % carry.target_update_period == 0,
                 self.is_pal,
                 self.alpha,
+                self.use_maxmin_dqn,
+                self.N,
                 self.use_ddqn,
                 self.use_k_step_learning,
                 self.k,
@@ -122,8 +128,8 @@ class Learner:
                 self.store_params()
             if i % self.save_interval == 0:
                 self.save_model()
-
-            self.buffer.update_priority.remote(data.index, priority)
+            if self.use_per:
+                self.buffer.update_priority.remote(data.index, priority)
 
             self.counter += 1
         self.done = True
@@ -134,7 +140,6 @@ class Learner:
         """
         actor_params = self.agent.actor.params
         self.actor_params_id = ray.put(actor_params)
-        # critic_params = self.critic.params
         self.critic_params_id = ray.put(None)
         self.train_actor_id = ray.put(self.train_actor)
 

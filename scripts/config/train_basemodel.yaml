@@ -1,0 +1,14 @@
+seed: 0
+min_map_size: 10
+max_map_size: 20
+
+
+defaults:
+  - _self_
+  - model: dqn
+  - train: sac
+  - env: pick_and_delivery/grid
+
+hydra:
+  run:
+    dir: results_base/${env.env_name}/${env.name}_${env.obs_type}/n${env.num_agents}_level${env.level}/${model.name}_${now:%Y-%m-%d_%H-%M-%S}
