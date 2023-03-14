@@ -32,6 +32,6 @@ def test_discrete_rollout(setup):
     actor = create_actor(env.observation_space, env.action_space, model_config, key)
 
     rollout_fn = build_rollout_episode(
-        env.instance, actor.apply_fn, evaluate=False, model_name=model_config.name
+        env.instance, actor.apply_fn, evaluate=False, model_config=model_config
     )
     carry = rollout_fn(key, actor.params, env.instance.obs)

@@ -32,6 +32,8 @@ class JaxPandDEnv(gym.Env):
         self._env_info, self._agent_info, self._task_info = self.instance.export_info()
         self.num_agents = config.num_agents
         self.num_items = config.num_items
+        self.max_life = config.max_life
+        self.use_hold_item_info = config.use_hold_item_info
         self.is_discrete = config.is_discrete
         self.is_diff_drive = config.is_diff_drive
         self._step = _build_inner_step(self._env_info, self._agent_info)
@@ -54,8 +56,10 @@ class JaxPandDEnv(gym.Env):
         elif self.is_diff_drive:
             comm_dim = 6  # (rel_pos, rot) * 2
         else:
-            comm_dim = 4  # (rel_pos,) * 2
-        item_dim = 4  # (item_pos, item_goal)
+            comm_dim = 5  # (rel_pos,) * 2 + life
+        if self.use_hold_item_info:
+            comm_dim += 4  # (is_hold_item, item_goal, item_time)
+        item_dim = 5  # (item_pos, item_goal, item_time)
 
         obs_dim = (
             self.obs.cat()[0].shape[0]
@@ -114,9 +118,11 @@ class JaxPandDEnv(gym.Env):
             ang=jnp.zeros_like(self.task_info.start_rots, dtype=int),
         )
         self.state = State(
-            agent_state,
-            jnp.ones((self.num_agents,), dtype=int) * self.num_items,
-            self.task_info.item_starts,
+            agent_state=agent_state,
+            load_item_id=jnp.ones((self.num_agents,), dtype=int) * self.num_items,
+            life=jnp.ones((self.num_agents,), dtype=int) * self.max_life,
+            item_pos=self.task_info.item_starts,
+            item_time=jnp.zeros((self.num_items,), dtype=int),
         )
 
         # initialize trial information
@@ -169,10 +175,12 @@ class JaxPandDEnv(gym.Env):
         Receives all agent actions as an array
         Returns the observation, reward, terminated, truncated and info
         """
-        state, rew, done, info = self._step(
-            self.state, actions, self.task_info, self.trial_info
+        key, state, rew, done, task_info, info = self._step(
+            self.key, self.state, actions, self.task_info, self.trial_info
         )
+        self.key = key
         self.state = state
+        self.task_info = task_info
         self.trial_info = info
         obs = self._observe(state, self.task_info, self.trial_info)
         return obs, rew, done, info

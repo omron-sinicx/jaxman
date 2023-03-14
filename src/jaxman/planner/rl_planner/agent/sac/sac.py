@@ -65,44 +65,6 @@ def create_sac_agent(
     return sac, key
 
 
-def restore_sac_actor(
-    actor: TrainState,
-    is_discrete: bool,
-    is_diff_drive: bool,
-    restore_dir: str,
-) -> Tuple[TrainState, TrainState, TrainState, TrainState]:
-    """restore pretrained model
-
-    Args:
-        actor (TrainState): TrainState of actor
-        is_discrete (bool): whether agent has discrete action space
-        is_diff_drive (bool): whether agent has diff drive action space
-        restore_dir (str): path to restore agent files in.
-
-    Returns:
-        Tuple[TrainState]: restored actor
-    """
-    if not is_discrete:
-        actor_params = checkpoints.restore_checkpoint(
-            ckpt_dir=restore_dir,
-            target=actor,
-            prefix="continuous_actor",
-        ).params
-    elif is_diff_drive:
-        actor_params = checkpoints.restore_checkpoint(
-            ckpt_dir=restore_dir,
-            target=actor,
-            prefix="diff_drive_actor",
-        ).params
-    else:
-        actor_params = checkpoints.restore_checkpoint(
-            ckpt_dir=restore_dir,
-            target=actor,
-            prefix="grid_actor",
-        ).params
-    return actor.replace(params=actor_params)
-
-
 @partial(
     jax.jit,
     static_argnames=(
@@ -227,3 +189,42 @@ def build_sample_action(actor_fn: Callable, is_discrete: bool, evaluate: bool):
         return key, actions
 
     return jax.jit(sample_action)
+
+
+def restore_sac_actor(
+    sac: SAC,
+    is_discrete: bool,
+    is_diff_drive: bool,
+    restore_dir: str,
+) -> SAC:
+    """restore pretrained model
+
+    Args:
+        sac (SAC): Namedtuple of SAC agent composed by [Actor, Critic, TargetCritic, Temperature]
+        is_discrete (bool): whether agent has discrete action space
+        is_diff_drive (bool): whether agent has diff drive action space
+        restore_dir (str): path to restore agent files in.
+
+    Returns:
+        SAC: restored sac
+    """
+    if not is_discrete:
+        actor_params = checkpoints.restore_checkpoint(
+            ckpt_dir=restore_dir,
+            target=sac.actor,
+            prefix="continuous_actor",
+        ).params
+    elif is_diff_drive:
+        actor_params = checkpoints.restore_checkpoint(
+            ckpt_dir=restore_dir,
+            target=sac.actor,
+            prefix="diff_drive_actor",
+        ).params
+    else:
+        actor_params = checkpoints.restore_checkpoint(
+            ckpt_dir=restore_dir,
+            target=sac.actor,
+            prefix="grid_actor",
+        ).params
+    actor = sac.actor.replace(params=actor_params)
+    return sac._replace(actor=actor)

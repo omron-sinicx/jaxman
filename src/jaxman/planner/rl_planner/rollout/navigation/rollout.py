@@ -17,6 +17,7 @@ from jaxman.env.obstacle import ObstacleMap
 from jaxman.env.task_generator import sample_valid_start_goal
 from jaxman.planner.rl_planner.agent.core import build_sample_agent_action
 from jaxman.planner.rl_planner.memory.dataset import Experience
+from omegaconf import DictConfig
 
 from .dynamics import _build_compute_agent_intention, _build_rollout_step
 
@@ -97,7 +98,7 @@ def build_rollout_episode(
     instance: Instance,
     actor_fn: Callable,
     evaluate: bool,
-    model_name: str,
+    model_config: DictConfig,
 ) -> Callable:
     """build rollout episode function
 
@@ -105,7 +106,7 @@ def build_rollout_episode(
         instance (Instance): problem instance
         actor_fn (Callable): actor function
         evaluate (bool): whether agent explorate or evaluate
-        model_name (str): agent model name (sac or dqn)
+        model_config (DictConfig): model configuration file
 
     Returns:
         Callable: jit-compiled rollout episode function
@@ -120,7 +121,7 @@ def build_rollout_episode(
     _observe = _build_observe(env_info, agent_info)
     _compute_intentions = _build_compute_agent_intention(env_info, agent_info, actor_fn)
     _sample_actions = build_sample_agent_action(
-        actor_fn, instance.is_discrete, evaluate, model_name
+        actor_fn, instance.is_discrete, evaluate, model_config
     )
 
     def _rollout_episode(

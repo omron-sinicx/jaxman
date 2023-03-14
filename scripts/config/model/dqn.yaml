@@ -3,9 +3,11 @@ hidden_dim: 256
 msg_dim: 32
 use_dueling_net: False
 use_multi_head: False
+use_maxmin_dqn: False
 # model optimization
-actor_lr: 0.001
-critic_lr: 0.001
-temp_lr: 0.001
+actor_lr: 0.0005
+critic_lr: 0.0005
+temp_lr: 0.0005
 decay_steps: 1000000
 decay_alpha: 0.05
+N: 3

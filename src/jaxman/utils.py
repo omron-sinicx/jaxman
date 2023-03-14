@@ -102,11 +102,5 @@ def split_obs_and_comm(
     is_hold_item = observations[
         :, -3 - total_comm_dim - mask_dim - total_item_dim - item_mask_dim
     ].reshape(-1, 1)
-    # print("obs",obs)
-    # print("comm",comm)
-    # print("mask",mask)
-    # print("item_pos",item_pos)
-    # print("item_mask",item_mask)
-    # print()
 
     return AgentObservation(obs, comm, mask, item_pos, item_mask, is_hold_item)

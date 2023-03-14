@@ -7,12 +7,14 @@ batch_size: 256
 auto_temp_tuning: True
 save_interval: 100000
 warmup_iters: 10000
+initial_rollout: 50000
 # buffer
-capacity: 1000000
+capacity: 2500000
 use_per: False
 per_alpha: 0.45
 per_beta: 0.55
-use_separete_sample: False
+use_separete_sample: True
+success_step_ratio: 0.2
 # evaluate
 eval_iters: 1000
 # curriculum
@@ -28,7 +30,7 @@ transform_q: False
 k: 4
 use_k_step_learning: True
 # batch normalization
-use_batch_norm: True
-batch_norm_tau: 0.99
+use_batch_norm: False
+batch_norm_tau: 0.995
 use_only_mean: False
 use_only_std: False

@@ -1,15 +1,15 @@
 import hydra
 import jax.numpy as jnp
-from jaxman.env.navigation.env import JaxMANEnv
+from jaxman.env.pick_and_delivery.env import JaxPandDEnv
 from omegaconf import OmegaConf
 
 
 def test_grid_env():
     config = hydra.utils.instantiate(
-        OmegaConf.load("scripts/config/env/navigation/grid.yaml")
+        OmegaConf.load("scripts/config/env/pick_and_delivery/grid.yaml")
     )
 
-    env = JaxMANEnv(config)
+    env = JaxPandDEnv(config)
     obs = env.reset()
     done = False
     base_actions = jnp.ones_like(env.sample_actions())

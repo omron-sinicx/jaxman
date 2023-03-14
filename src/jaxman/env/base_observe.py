@@ -258,8 +258,8 @@ def _build_get_obs_pos(env_info: EnvInfo, agent_info: AgentInfo):
             else:
                 pos = jnp.vstack((state.agent_state.pos, state.item_pos))
                 state = state.agent_state
-            obs_agent_map = _add_agent_pos_to_obstacle_map(pos, obs_map)
-            fov = jax.vmap(_extract_fov, in_axes=(0, None))(state, obs_agent_map)
+            obs_map = _add_agent_pos_to_obstacle_map(pos, obs_map)
+            fov = jax.vmap(_extract_fov, in_axes=(0, None))(state, obs_map)
             flatten_fov = fov.reshape(num_agents, -1)
             return flatten_fov
 

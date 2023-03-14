@@ -16,10 +16,10 @@ from omegaconf import DictConfig
 from ..memory.dataset import TrainBatch
 from .dqn.dqn import DQN, _update_dqn_jit
 from .dqn.dqn import build_sample_action as build_sample_dqn_action
-from .dqn.dqn import create_dqn_agent
+from .dqn.dqn import create_dqn_agent, restore_dqn_actor
 from .sac.sac import SAC, _update_sac_jit
 from .sac.sac import build_sample_action as build_sample_sac_action
-from .sac.sac import create_sac_agent
+from .sac.sac import create_sac_agent, restore_sac_actor
 
 Agent = Union[SAC, DQN]
 
@@ -53,12 +53,12 @@ def create_agent(
 
 
 def build_sample_agent_action(
-    actor_fn: Callable, is_discrete: bool, evaluate: bool, model_name: str
+    actor_fn: Callable, is_discrete: bool, evaluate: bool, model_config: DictConfig
 ):
-    if model_name == "sac":
+    if model_config.name == "sac":
         return build_sample_sac_action(actor_fn, is_discrete, evaluate)
     else:
-        return build_sample_dqn_action(actor_fn, evaluate)
+        return build_sample_dqn_action(actor_fn, evaluate, model_config.use_maxmin_dqn)
 
 
 @partial(
@@ -68,6 +68,8 @@ def build_sample_agent_action(
         "auto_temp_tuning",
         "update_target",
         "is_pal",
+        "use_maxmin_dqn",
+        "N",
         "use_ddqn",
         "use_k_step_learning",
         "train_actor",
@@ -86,6 +88,8 @@ def _update_jit(
     update_target: bool,
     is_pal: bool,
     alpha: bool,
+    use_maxmin_dqn: bool,
+    N: int,
     use_ddqn: bool,
     use_k_step_learning: bool,
     k: int,
@@ -93,14 +97,11 @@ def _update_jit(
     model_name: str,
 ) -> Tuple[PRNGKey, TrainState, TrainState, TrainState, TrainState, Dict]:
     """
-    update SAC agent network
+    update agent network
 
     Args:
         key (PRNGKey): random varDable key
-        actor (TrainState): TrainState of actor
-        critic (TrainState): TrainState of critic
-        target_critic (TrainState): TrainState of target_critic
-        temp (TrainState): TrainState of temperature
+        agent (Agent): Namedtuple of agent.
         batch (TrainBatch): Train Batch
         gamma (float): gamma. decay rate
         tau (float): tau. target critic update rate
@@ -108,7 +109,15 @@ def _update_jit(
         target_entropy (float): target entropy
         auto_temp_tuning (bool): whether to update temperature
         update_target (bool): whether to update target_critic network
+        is_pal (bool): whether to use persistent advantage laerning or not
+        alpha (float): weight of action gap used for persistent advantage learning
+        use_maxmin_dqn (bool): whether to use Maxmin Q-Learning
+        N (int): number of networks for Maxmin Q-Learning
+        use_ddqn (bool): whether to use double dqn
+        use_k_step_learning (bool): whether to use k step learning
+        k (int): k for multi step learning
         train_actor (bool): whether to update actor
+        model_name (str): model name, sac or dqn
 
     Returns:
         Tuple[PRNGKey, TrainState, TrainState, TrainState, TrainState, Dict]: new key, updated SAC agent, loss informations
@@ -127,15 +136,32 @@ def _update_jit(
             train_actor,
         )
     else:
+        key, subkey = jax.random.split(key)
         new_agent, priority, info = _update_dqn_jit(
+            subkey,
             agent,
             batch,
             gamma,
             tau,
             is_pal,
             alpha,
+            use_maxmin_dqn,
+            N,
             use_ddqn,
             use_k_step_learning,
             k,
         )
     return key, new_agent, priority, info
+
+
+def restore_agent(
+    agent: Agent,
+    is_discrete: bool,
+    is_diff_drive: bool,
+    model_config: DictConfig,
+    restore_dir: str,
+) -> Agent:
+    if isinstance(agent, SAC):
+        return restore_sac_actor(agent, is_discrete, is_diff_drive, restore_dir)
+    else:
+        return restore_dqn_actor(agent, is_diff_drive, model_config, restore_dir)

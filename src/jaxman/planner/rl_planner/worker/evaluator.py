@@ -19,6 +19,7 @@ import ray
 from flax.training.train_state import TrainState
 from jaxman.env import Instance, TrialInfo
 from jaxman.env.viz.viz import render_gif
+from omegaconf import DictConfig
 
 from ..rollout.rollout import _build_rollout_episode
 from .learner import Learner
@@ -31,7 +32,7 @@ class Evaluator:
         learner: Learner,
         actor: TrainState,
         instance: Instance,
-        model_name: str,
+        model_config: DictConfig,
         seed: int = 0,
     ) -> None:
         """
@@ -41,14 +42,14 @@ class Evaluator:
             learner (Learner): learner. update agent parameters
             actor (TrainState): actor
             instance (Instance): envrironment instance
-            model_name (str): agent model name (sac or dqn)
+            model_config (DictConfig): model configuration
             seed (int, optional): seed. Defaults to 0
         """
         self.learner = learner
         self.actor = actor
         self.instance = instance
         self.env_name = instance.env_name
-        self.model_name = model_name
+        self.model_config = model_config
 
         self.seed = seed
 
@@ -59,7 +60,7 @@ class Evaluator:
         self.animation = None
         self.done = False
         self._rollout_fn = _build_rollout_episode(
-            instance, actor.apply_fn, evaluate=True, model_name=model_name
+            instance, actor.apply_fn, evaluate=True, model_config=model_config
         )
 
     def run(self) -> None:
@@ -100,18 +101,24 @@ class Evaluator:
                     state_traj = carry.experience.observations[:steps, :, :5]
                     last_state = carry.state.cat()
                     item_traj = None
+                    goal_traj = None
                 else:
+                    # TODO
                     state_traj = jnp.concatenate(
                         (
-                            carry.experience.observations[:steps, :, :5],
+                            carry.experience.observations[:steps, :, :6],
                             jnp.expand_dims(carry.load_item_id_traj[:steps], -1),
                         ),
                         -1,
                     )
                     item_traj = carry.item_traj[:steps]
-                    last_state, last_item_pos = carry.state.cat()
+                    last_state, last_item_info = carry.state.cat()
                     item_traj = jnp.vstack(
-                        (item_traj, jnp.expand_dims(last_item_pos, axis=0))
+                        (item_traj, jnp.expand_dims(last_item_info, axis=0))
+                    )
+                    goal_traj = carry.goal_traj[:steps]
+                    goal_traj = jnp.vstack(
+                        (goal_traj, jnp.expand_dims(carry.task_info.item_goals, axis=0))
                     )
 
                 state_traj = jnp.vstack(
@@ -123,6 +130,7 @@ class Evaluator:
                 animation = render_gif(
                     state_traj,
                     item_traj,
+                    goal_traj,
                     self.instance.rads,
                     carry.task_info,
                     carry.trial_info,

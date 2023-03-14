@@ -1,3 +1,8 @@
+"""script for training models
+
+Author: Hikaru Asano
+Affiliation: OMRON SINIC X / University of Tokyo
+"""
 import logging
 import time
 
@@ -7,8 +12,7 @@ import jax.numpy as jnp
 import ray
 from jaxman.env.navigation.env import JaxMANEnv
 from jaxman.env.pick_and_delivery.env import JaxPandDEnv
-from jaxman.planner.rl_planner.agent.core import create_agent
-from jaxman.planner.rl_planner.agent.sac.sac import restore_sac_actor
+from jaxman.planner.rl_planner.agent.core import create_agent, restore_agent
 from jaxman.planner.rl_planner.logger import LogResult
 from jaxman.planner.rl_planner.worker import (
     Evaluator,
@@ -53,13 +57,13 @@ def main(config):
             key,
         )
         if config.train.use_pretrained_model:
-            actor = restore_sac_actor(
-                agent.actor,
+            agent = restore_agent(
+                agent,
                 config.env.is_discrete,
                 config.env.is_diff_drive,
-                f"../../../../../model/{config.env.env_name}",
+                config.model,
+                f"../../../../../model/{config.env.env_name}_{config.env.obs_type}",
             )
-            agent = agent._replace(actor=actor)
 
         action_scale = None
         action_bias = None
@@ -84,7 +88,7 @@ def main(config):
             learner,
             agent.actor,
             env.instance,
-            config.model.name,
+            config.model,
             config.seed,
         )
         rollout_worker.run.remote()
@@ -92,13 +96,13 @@ def main(config):
             learner,
             agent.actor,
             env.instance,
-            config.model.name,
+            config.model,
             config.seed,
         )
         evaluator.run.remote()
 
         data_num = 0
-        while data_num < 10000:
+        while data_num < config.train.initial_rollout:
             time.sleep(1)
             data_num = ray.get(ray.get(buffer.num_data.remote()))
 

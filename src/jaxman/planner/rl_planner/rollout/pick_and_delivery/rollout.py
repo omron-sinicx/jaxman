@@ -17,6 +17,7 @@ from jaxman.env.pick_and_delivery.observe import _build_observe
 from jaxman.env.task_generator import sample_valid_agent_item_pos
 from jaxman.planner.rl_planner.agent.core import build_sample_agent_action
 from jaxman.planner.rl_planner.memory.dataset import Experience
+from omegaconf import DictConfig
 
 from .dynamics import _build_compute_agent_intention, _build_rollout_step
 
@@ -31,6 +32,7 @@ class Carry(NamedTuple):
     experience: Experience
     load_item_id_traj: Array
     item_traj: Array
+    goal_traj: Array
     rewards: Array
     dones: Array
 
@@ -63,6 +65,7 @@ class Carry(NamedTuple):
             num_items,
             env_info.is_discrete,
             env_info.is_discrete,
+            is_biased_sample=env_info.is_biased_sample,
         )
         is_item_loaded = jnp.expand_dims(jnp.arange(num_items) < num_agents, -1)
         item_starts = (item_starts + is_item_loaded * 10000).astype(int)
@@ -76,7 +79,13 @@ class Carry(NamedTuple):
             vel=jnp.zeros_like(task_info.start_rots),
             ang=jnp.zeros_like(task_info.start_rots),
         )
-        state = State(agent_state, jnp.arange(num_agents, dtype=int), item_starts)
+        state = State(
+            agent_state=agent_state,
+            load_item_id=jnp.arange(num_agents, dtype=int),
+            life=jnp.ones(num_agents, dtype=int) * env_info.max_life,  # life
+            item_pos=item_starts,
+            item_time=jnp.zeros(num_items, dtype=int),
+        )
         observations = _observe(state, task_info, trial_info)
         rewards = jnp.zeros((num_agents,))
         dones = jnp.array([False] * num_agents)
@@ -97,6 +106,9 @@ class Carry(NamedTuple):
         )
         load_item_id_traj = jnp.zeros((env_info.timeout, env_info.num_agents))
         item_traj = jnp.zeros(
+            (env_info.timeout, env_info.num_items, 3), observations.item_info.dtype
+        )
+        goal_traj = jnp.zeros(
             (env_info.timeout, env_info.num_items, 2), observations.item_info.dtype
         )
         return self(
@@ -109,6 +121,7 @@ class Carry(NamedTuple):
             experience,
             load_item_id_traj,
             item_traj,
+            goal_traj,
             rewards,
             dones,
         )
@@ -118,7 +131,7 @@ def build_rollout_episode(
     instance: Instance,
     actor_fn: Callable,
     evaluate: bool,
-    model_name: str,
+    model_config: DictConfig,
 ) -> Callable:
     """build rollout episode function
 
@@ -126,21 +139,26 @@ def build_rollout_episode(
         instance (Instance): problem instance
         actor_fn (Callable): actor function
         evaluate (bool): whether agent explorate or evaluate
+        model_config (DictConfig): model configuration
 
     Returns:
         Callable: jit-compiled rollout episode function
     """
+    use_maxmin_dqn = model_config.use_maxmin_dqn
     env_info, agent_info, _ = instance.export_info()
     _step = _build_rollout_step(
         env_info,
         agent_info,
         actor_fn,
+        use_maxmin_dqn,
     )
 
     _observe = _build_observe(env_info, agent_info)
-    _compute_intentions = _build_compute_agent_intention(env_info, agent_info, actor_fn)
+    _compute_intentions = _build_compute_agent_intention(
+        env_info, agent_info, actor_fn, use_maxmin_dqn
+    )
     _sample_actions = build_sample_agent_action(
-        actor_fn, instance.is_discrete, evaluate, model_name
+        actor_fn, instance.is_discrete, evaluate, model_config
     )
 
     def _rollout_episode(
@@ -173,8 +191,21 @@ def build_rollout_episode(
             actions = jax.vmap(lambda action, mask: action * mask)(
                 actions, not_finished_agent
             )
-            next_state, next_observations, rews, dones, new_trial_info = _step(
-                carry.state, actions, carry.task_info, carry.trial_info, actor_params
+            (
+                key,
+                next_state,
+                next_observations,
+                rews,
+                dones,
+                new_task_info,
+                new_trial_info,
+            ) = _step(
+                key,
+                carry.state,
+                actions,
+                carry.task_info,
+                carry.trial_info,
+                actor_params,
             )
 
             rewards = carry.rewards + rews
@@ -184,20 +215,25 @@ def build_rollout_episode(
             load_item_id_traj = carry.load_item_id_traj.at[carry.episode_steps].set(
                 carry.state.load_item_id
             )
-            item_traj = carry.item_traj.at[carry.episode_steps].set(
-                carry.state.item_pos
+            item_info = jnp.hstack(
+                (carry.state.item_pos, jnp.expand_dims(carry.state.item_time, -1))
+            )
+            item_traj = carry.item_traj.at[carry.episode_steps].set(item_info)
+            goal_traj = carry.goal_traj.at[carry.episode_steps].set(
+                carry.task_info.item_goals
             )
 
             carry = Carry(
                 episode_steps=carry.episode_steps + 1,
                 state=next_state,
-                task_info=carry.task_info,
+                task_info=new_task_info,
                 trial_info=new_trial_info,
                 observations=next_observations,
                 key=key,
                 experience=experience,
                 load_item_id_traj=load_item_id_traj,
                 item_traj=item_traj,
+                goal_traj=goal_traj,
                 rewards=rewards,
                 dones=dones,
             )
