@@ -8,13 +8,14 @@ from typing import Callable, NamedTuple, Tuple
 
 import jax
 import jax.numpy as jnp
-from chex import Array, PRNGKey
+from chex import Array, PRNGKey, assert_shape
 
 from ..core import AgentInfo, AgentState, EnvInfo
 from ..kinematic_dynamics import (
     _build_check_collision_with_agents,
     _build_check_collision_with_obs,
     _build_compute_next_state,
+    _get_obstacle_dist,
 )
 from ..obstacle import ObstacleMap
 from .core import State, TaskInfo, TrialInfo
@@ -40,9 +41,9 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
     )
     _check_collision_with_obs = _build_check_collision_with_obs(agent_info, is_discrete)
     _check_collision_with_items = _build_check_collision_with_items(
-        is_discrete, agent_info
+        env_info, agent_info
     )
-    _compute_is_item_solved = _build_compute_is_solved(is_discrete, agent_info)
+    _compute_is_item_solved = _build_compute_is_solved(env_info, agent_info)
     _check_is_item_collided = _build_check_is_item_collided(env_info, agent_info)
     _compute_rew_done_info = _build_compute_rew_done_info(env_info)
     _respawn_items = _build_respawn_items(env_info)
@@ -75,7 +76,9 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         # update state
         movable_agents = jnp.logical_not(trial_info.agent_collided)
         masked_actions = jax.vmap(lambda a, b: a * b)(actions, movable_agents)
-        possible_next_state = _compute_next_state(state, masked_actions, task_info)
+        possible_next_state, new_item_starts = _compute_next_state(
+            state, masked_actions, task_info
+        )
 
         # update agent collision
         collided_with_obs = _check_collision_with_obs(
@@ -104,6 +107,9 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
             item_collided * is_crashable,
             item_solved,
             trial_info,
+            task_info.item_starts,
+            new_item_starts,
+            task_info.item_goals,
         )
 
         # if agent finish own episode, agent speed is set to 0
@@ -126,6 +132,7 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         )
 
         # respawn items
+        task_info = task_info._replace(item_starts=new_item_starts)
         if env_info.is_respawn:
             key, next_state, task_info = _respawn_items(
                 key, next_state, task_info, done_item.astype(bool)
@@ -146,7 +153,7 @@ def _build_compute_next_env_state(env_info: EnvInfo, agent_info: AgentInfo) -> C
     Returns:
         Callable: jit-compiled function to compute next agent and item state
     """
-    _compute_agent_next_state = _build_compute_next_agent_state(env_info)
+    _compute_agent_next_state = _build_compute_next_agent_state(env_info, agent_info)
     _compute_next_item_state = _build_compute_next_item_state(env_info, agent_info)
 
     def _compute_next_env_state(
@@ -155,34 +162,43 @@ def _build_compute_next_env_state(env_info: EnvInfo, agent_info: AgentInfo) -> C
         next_agent_state = _compute_agent_next_state(
             state, actions, agent_info, task_info
         )
-        next_load_item_id, next_item_pos = _compute_next_item_state(
+        next_load_item_id, next_item_pos, item_starts = _compute_next_item_state(
             next_agent_state, actions, state.load_item_id, state.item_pos, task_info
         )
         is_load_item = next_load_item_id < env_info.num_items
         life = state.life - is_load_item + jnp.logical_not(is_load_item)
         life = jnp.clip(life, a_min=-1, a_max=5)
         item_time = state.item_time + 1
-        return State(
-            next_agent_state, next_load_item_id, life, next_item_pos, item_time
+        return (
+            State(next_agent_state, next_load_item_id, life, next_item_pos, item_time),
+            item_starts,
         )
 
     return jax.jit(_compute_next_env_state)
 
 
-def _build_compute_next_agent_state(env_info: EnvInfo) -> Callable:
+def _build_compute_next_agent_state(
+    env_info: EnvInfo, agent_info: AgentInfo
+) -> Callable:
     """
     build jit-compiled function to compute next agent state
 
     Args:
-        env_info (EnvInfo): environment base informations
+        env_info (EnvInfo): environment base information
+        agent_info (AgentInfo): agent kinematics information
 
     Returns:
         Callable: jit-compiled function
     """
-
-    _compute_next_state = _build_compute_next_state(
+    is_discrete = env_info.is_discrete
+    num_agents = env_info.num_agents
+    _compute_kinematic_next_state = _build_compute_next_state(
         env_info.is_discrete, env_info.is_diff_drive
     )
+    _check_collide_with_agent_item = _build_check_collide_with_agent_item(
+        env_info, agent_info
+    )
+    _check_collide_with_obs = _build_check_collide_with_obs(agent_info)
 
     def _apply_load_or_unload(
         current_state: State, next_possible_state: AgentState, action: Array
@@ -199,26 +215,40 @@ def _build_compute_next_agent_state(env_info: EnvInfo) -> Callable:
         Returns:
             AgentState: updated agent next state
         """
-        can_move = action < 5
-        arrayed_next_state = (
-            can_move * next_possible_state.cat() + ~can_move * current_state.cat()
-        )
-        if env_info.is_discrete:
-            arrayed_next_state = arrayed_next_state.astype(int)
-        return AgentState.from_array(arrayed_next_state)
+        if is_discrete:
+            can_move = action < 5
+            arrayed_next_state = (
+                can_move * next_possible_state.cat() + ~can_move * current_state.cat()
+            )
+            next_state = AgentState.from_array(arrayed_next_state.astype(int))
+        else:
+            can_move = action[-1] <= 0
+            # if agent choose to load/unload action, then agent stop at the current position and vel and ang is set to 0
+            next_state = AgentState(
+                pos=can_move * next_possible_state.pos + ~can_move * current_state.pos,
+                rot=can_move * next_possible_state.rot + ~can_move * current_state.rot,
+                vel=can_move * next_possible_state.vel,
+                ang=can_move * next_possible_state.ang,
+            )
+        return next_state
 
     def _compute_agent_next_state(
         state: State, actions: Array, agent_info: AgentInfo, task_info: TaskInfo
     ) -> AgentState:
-        possible_next_state = jax.vmap(_compute_next_state)(
-            state.agent_state, actions, agent_info
-        )
+        if is_discrete:
+            possible_next_state = jax.vmap(_compute_kinematic_next_state)(
+                state.agent_state, actions, agent_info
+            )
+        else:
+            possible_next_state = jax.vmap(_compute_kinematic_next_state)(
+                state.agent_state, actions[:-1], agent_info
+            )
         next_state = jax.vmap(_apply_load_or_unload)(
             state.agent_state, possible_next_state, actions
         )
         return next_state
 
-    def _compute_non_crashable_next_state(
+    def _compute_discrete_non_crashable_next_state(
         state: State, action: Array, agent_info: AgentInfo, task_info: TaskInfo
     ) -> AgentState:
         class Carry(NamedTuple):
@@ -227,7 +257,7 @@ def _build_compute_next_agent_state(env_info: EnvInfo) -> Callable:
             collided: Array
 
         def _inner_step(i: int, carry: Carry):
-            next_state = _compute_next_state(
+            next_state = _compute_kinematic_next_state(
                 AgentState.from_array(carry.state[i]), action[i], agent_info.at(i)
             )
 
@@ -259,10 +289,51 @@ def _build_compute_next_agent_state(env_info: EnvInfo) -> Callable:
         carry = jax.lax.fori_loop(0, env_info.num_agents, _inner_step, carry)
         return AgentState.from_array(carry.state)
 
+    def _compute_continuous_non_crashable_next_state(
+        state: State, action: Array, agent_info: AgentInfo, task_info: TaskInfo
+    ) -> AgentState:
+        class Carry(NamedTuple):
+            state: Array
+            agent_pos: Array
+            collided: Array
+
+        def _inner_step(i: int, carry: Carry) -> Carry:
+            next_state = _compute_kinematic_next_state(
+                AgentState.from_array(carry.state[i]), action[i, :-1], agent_info.at(i)
+            )
+
+            next_pos = next_state.pos
+            is_move_action = action[i][-1] <= 0
+            # check collision with agents or items
+            all_pos = jnp.concatenate((carry.agent_pos, item_pos))
+            agent_item_collided = _check_collide_with_agent_item(next_pos, all_pos)
+            # check collision with obstacles
+            obs_collided = _check_collide_with_obs(next_pos, task_info.obs.sdf)
+            is_collide = jnp.logical_or(agent_item_collided, obs_collided)
+            can_move = jnp.logical_and(is_move_action, jnp.logical_not(is_collide))
+            # if agent take un movable action, then agent's vel and ang is set to 0
+            possible_state = carry.state[i].at[-1].set(0).at[-2].set(0)
+            next_state = can_move * next_state.cat() + ~can_move * possible_state
+
+            state = carry.state.at[i].set(next_state)
+            agent_pos = carry.agent_pos.at[i].set(next_state[:2])
+            collided = carry.collided.at[i].set(is_collide)
+            return Carry(state, agent_pos, collided)
+
+        item_pos = state.item_pos
+        agent_pos = jnp.ones((num_agents, 2), dtype=float) * jnp.inf
+        is_collided = jnp.zeros((num_agents,))
+        carry = Carry(state.agent_state.cat(), agent_pos, is_collided)
+        carry = jax.lax.fori_loop(0, env_info.num_agents, _inner_step, carry)
+        return AgentState.from_array(carry.state)
+
     if env_info.is_crashable:
         return jax.jit(_compute_agent_next_state)
     else:
-        return jax.jit(_compute_non_crashable_next_state)
+        if is_discrete:
+            return jax.jit(_compute_discrete_non_crashable_next_state)
+        else:
+            return jax.jit(_compute_continuous_non_crashable_next_state)
 
 
 def _build_compute_next_item_state(
@@ -280,12 +351,18 @@ def _build_compute_next_item_state(
     num_items = env_info.num_items
     dummy_index = num_items
     num_agents = env_info.num_agents
+    _check_collide_with_agent_item = _build_check_collide_with_agent_item(
+        env_info, agent_info
+    )
+    _check_collide_with_obs = _build_check_collide_with_obs(agent_info)
+    rads = jnp.array(agent_info.rads)
 
     class Carry(NamedTuple):
         state: AgentState
         actions: Array
         load_item_id: int
         item_pos: Array
+        item_starts: Array
         obs: ObstacleMap
 
     def _move_or_load_unload_items(i: int, carry: Carry):
@@ -336,47 +413,96 @@ def _build_compute_next_item_state(
                 The agent unloads the item if there is nothing at the destination where the item is to be unloaded;
                 otherwise, the item remains loaded.
                 """
-                # grid case
-                possible_item_pos = carry.state.pos[i] + jnp.array([0, -1], dtype=int)
-                # Check whether there are any obstacles at the location to unload
-                obstacle_collide = jnp.array(
-                    carry.obs.occupancy[possible_item_pos[0], possible_item_pos[1]],
-                    dtype=bool,
-                )
-                # Check whether there are any items at the location to unload
-                item_collide = jnp.any(
-                    jnp.all(jnp.equal(carry.item_pos, possible_item_pos), axis=-1)
-                )
+                if env_info.is_discrete:
+                    possible_item_pos = carry.state.pos[i] + jnp.array(
+                        [0, -1], dtype=int
+                    )
+                    # Check whether there are any obstacles at the location to unload
+                    obstacle_collide = jnp.array(
+                        carry.obs.occupancy[possible_item_pos[0], possible_item_pos[1]],
+                        dtype=bool,
+                    )
+                    # Check whether there are any agent or items at the location to unload
+                    agent_item_pos = jnp.concatenate(
+                        (carry.state.pos, carry.item_pos), axis=0
+                    )
+                    agent_item_collide = jnp.any(
+                        jnp.all(jnp.equal(agent_item_pos, possible_item_pos), axis=-1)
+                    )
 
-                can_unload = jnp.logical_not(
-                    jnp.logical_or(obstacle_collide, item_collide)
-                )
+                    can_unload = jnp.logical_not(
+                        jnp.logical_or(obstacle_collide, agent_item_collide)
+                    )
 
-                # if agent can unload items, item_position is updated, else item position is set to INF (agent continue to load item)
-                next_item_pos = carry.item_pos.at[carry.load_item_id[i]].set(
-                    can_unload * possible_item_pos + ~can_unload * jnp.array([INF, INF])
-                )
-                # if agent can unload items, load_item_id for i th agent is set to dummy_index(dot't carry any item)
-                next_load_item_id = carry.load_item_id.at[i].set(
-                    can_unload * dummy_index + ~can_unload * carry.load_item_id[i]
-                )
+                    # if agent can unload items, item_position is updated, else item position is set to INF (agent continue to load item)
+                    next_item_pos = carry.item_pos.at[carry.load_item_id[i]].set(
+                        can_unload * possible_item_pos
+                        + ~can_unload * jnp.array([INF, INF])
+                    )
+                    # if agent can unload items, load_item_id for i th agent is set to dummy_index(dot't carry any item)
+                    next_load_item_id = carry.load_item_id.at[i].set(
+                        can_unload * dummy_index + ~can_unload * carry.load_item_id[i]
+                    )
 
-                return carry._replace(
-                    item_pos=next_item_pos, load_item_id=next_load_item_id
-                )
+                    return carry._replace(
+                        item_pos=next_item_pos, load_item_id=next_load_item_id
+                    )
+                else:
+                    # unload item in the direction the agent is facing
+                    possible_item_pos = carry.state.pos[i] + 2.5 * rads[i] * jnp.hstack(
+                        [jnp.sin(carry.state.rot[i]), jnp.cos(carry.state.rot[i])]
+                    )
+                    # Check whether there are any obstacles at the location to unload
+                    obstacle_collide = _check_collide_with_obs(
+                        possible_item_pos, carry.obs.sdf
+                    )
+                    # Check whether there are any agents or items at the location to unload
+                    all_pos = jnp.concatenate((carry.state.pos, carry.item_pos))
+                    agent_item_collide = _check_collide_with_agent_item(
+                        possible_item_pos, all_pos
+                    )
+
+                    can_unload = jnp.logical_not(
+                        jnp.logical_or(obstacle_collide, agent_item_collide)
+                    )
+
+                    # if agent can unload items, item_position is updated, else item position is set to INF (agent continue to load item)
+                    next_item_pos = carry.item_pos.at[carry.load_item_id[i]].set(
+                        can_unload * possible_item_pos
+                        + ~can_unload * jnp.array([INF, INF])
+                    )
+                    # if agent can unload items, load_item_id for i th agent is set to dummy_index(dot't carry any item)
+                    next_load_item_id = carry.load_item_id.at[i].set(
+                        can_unload * dummy_index + ~can_unload * carry.load_item_id[i]
+                    )
+
+                    # if agent can unload item, item_starts is updated to the next state
+                    item_starts = carry.item_starts.at[carry.load_item_id[i]].set(
+                        can_unload * next_item_pos[carry.load_item_id[i]]
+                        + ~can_unload * carry.item_starts[carry.load_item_id[i]]
+                    )
+
+                    return carry._replace(
+                        item_pos=next_item_pos,
+                        load_item_id=next_load_item_id,
+                        item_starts=item_starts,
+                    )
 
             def load_items(i: int, carry: Carry):
                 """
                 load item if there is an item in neighbor
                 and remain unloaded if there is no item in neighbor
                 """
-                dist_to_item = jnp.sum(
-                    (carry.item_pos - carry.state.pos[i]) ** 2, axis=1
+                dist_to_item = jnp.sqrt(
+                    jnp.sum((carry.item_pos - carry.state.pos[i]) ** 2, axis=1)
                 )
                 nearest_item_index = jnp.argmin(dist_to_item)
                 nearest_item_dist = dist_to_item[nearest_item_index]
-                # discrete case
-                can_pickup = nearest_item_dist <= 1
+                if env_info.is_discrete:
+                    can_pickup = nearest_item_dist <= 1
+                else:
+                    can_pickup = nearest_item_dist <= 2.5 * rads[i][0]
+                    assert_shape(can_pickup, ())
                 next_load_item_id = carry.load_item_id.at[i].set(
                     can_pickup * nearest_item_index + ~can_pickup * dummy_index
                 )
@@ -393,7 +519,10 @@ def _build_compute_next_item_state(
                 carry.load_item_id[i] < num_items, unload_items, load_items, i, carry
             )
 
-        is_move = carry.actions[i] < 5
+        if env_info.is_discrete:
+            is_move = carry.actions[i] < 5
+        else:
+            is_move = carry.actions[i, -1] <= 0
         return jax.lax.cond(is_move, move_agent, load_or_unload, i, carry)
 
     def _compute_next_item_state(
@@ -403,19 +532,21 @@ def _build_compute_next_item_state(
         item_pos: Array,
         task_info: TaskInfo,
     ) -> Tuple[Array, Array]:
-        carry = Carry(state, actions, load_item_id, item_pos, task_info.obs)
+        carry = Carry(
+            state, actions, load_item_id, item_pos, task_info.item_starts, task_info.obs
+        )
         carry = jax.lax.fori_loop(0, num_agents, _move_or_load_unload_items, carry)
-        return carry.load_item_id, carry.item_pos
+        return carry.load_item_id, carry.item_pos, carry.item_starts
 
     return jax.jit(_compute_next_item_state)
 
 
-def _build_check_collision_with_items(is_discrete: bool, agent_info: AgentInfo):
+def _build_check_collision_with_items(env_info: EnvInfo, agent_info: AgentInfo):
     """build jit compiled collision check function
 
     Args:
-        is_discrete (bool): whether agent action space is discrete or not
-        agent_info (AgentInfo): agent kinematic informations
+        env_info (EnvInfo): environment base information
+        agent_info (AgentInfo): agent kinematics information
     """
 
     def _check_discrete_collision_with_items(pos: Array, item_pos: Array):
@@ -426,9 +557,17 @@ def _build_check_collision_with_items(is_discrete: bool, agent_info: AgentInfo):
         return collide
 
     def _check_continuous_collision_with_items(pos: Array, item_pos: Array):
-        pass
+        def _inner_check(pos: Array, item_pos: Array):
+            dist_to_item = (
+                jnp.linalg.norm(item_pos - pos, axis=1) - env_info.item_rads.flatten()
+            )
+            assert_shape(dist_to_item, (env_info.num_items,))
+            return jnp.any(dist_to_item < env_info.item_rads)
 
-    if is_discrete:
+        collide = jax.vmap(_inner_check, in_axes=(0, None))(pos, item_pos)
+        return collide
+
+    if env_info.is_discrete:
         return _check_discrete_collision_with_items
     else:
         return _check_continuous_collision_with_items
@@ -457,12 +596,21 @@ def _build_check_is_item_collided(env_info: EnvInfo, agent_info: AgentInfo):
         state: State,
         agent_collided: Array,
     ):
-        is_collided_by_agent = jax.vmap(
-            lambda item_pos, agent_pos: jnp.any(
-                jnp.all(jnp.equal(agent_pos, item_pos), axis=-1)
-            ),
-            in_axes=(0, None),
-        )(state.item_pos, state.agent_state.pos)
+        if env_info.is_discrete:
+            is_collided_by_agent = jax.vmap(
+                lambda item_pos, agent_pos: jnp.any(
+                    jnp.all(jnp.equal(agent_pos, item_pos), axis=-1)
+                ),
+                in_axes=(0, None),
+            )(state.item_pos, state.agent_state.pos)
+        else:
+            is_collided_by_agent = jax.vmap(
+                lambda item_pos, agent_pos: jnp.any(
+                    jnp.sqrt(jnp.sum((agent_pos - item_pos) ** 2, axis=-1))
+                    < (2 * agent_info.rads.flatten())
+                ),
+                in_axes=(0, None),
+            )(state.item_pos, state.agent_state.pos)
         is_collided_by_carrying_agent = jnp.sum(
             jax.vmap(
                 lambda load_item_id, agent_collided: zeros_frag.at[load_item_id].set(
@@ -479,7 +627,7 @@ def _build_check_is_item_collided(env_info: EnvInfo, agent_info: AgentInfo):
     return jax.jit(_check_discrete_is_item_collided)
 
 
-def _build_compute_is_solved(is_discrete: bool, agent_info: AgentInfo):
+def _build_compute_is_solved(env_info: EnvInfo, agent_info: AgentInfo):
     def _compute_discrete_is_solved(item_pos: Array, item_goals: Array):
         """
         compute is each item has been delivered to the item goal
@@ -496,9 +644,10 @@ def _build_compute_is_solved(is_discrete: bool, agent_info: AgentInfo):
         return jnp.all(jnp.equal(item_pos, item_goals), axis=-1)
 
     def _compute_continuous_is_solved(item_pos, item_goals):
-        pass
+        dist = jnp.sqrt(jnp.sum((item_pos - item_goals) ** 2, axis=-1))
+        return dist < env_info.item_rads.flatten() * 2
 
-    if is_discrete:
+    if env_info.is_discrete:
         return _compute_discrete_is_solved
     else:
         return _compute_continuous_is_solved
@@ -517,6 +666,9 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
         item_collided: Array,
         solved: Array,
         trial_info: TrialInfo,
+        old_item_starts: Array,
+        new_item_starts: Array,
+        item_goals: Array,
     ) -> Tuple[Array, Array, TrialInfo]:
         def _compute_solve_rew(
             old_state: State, old_trial_info: TrialInfo, new_trial_info: TrialInfo
@@ -545,12 +697,37 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
 
             return solve_rew
 
+        def _compute_distance(
+            agent_index,
+            old_item_starts,
+            new_item_starts,
+            item_goals,
+            old_load_item_id,
+            new_load_item_id,
+        ):
+            old_item_id = old_load_item_id[agent_index]
+            is_unload = (old_load_item_id[agent_index] < num_items) & (
+                new_load_item_id[agent_index] >= num_items
+            )
+
+            old_distance = jnp.linalg.norm(
+                old_item_starts[old_item_id] - item_goals[old_item_id]
+            )
+            new_distance = jnp.linalg.norm(
+                new_item_starts[old_item_id] - item_goals[old_item_id]
+            )
+            carry_distance = jnp.clip(old_distance - new_distance, a_min=0)
+            return carry_distance * is_unload
+
         def _compute_rew(
             agent_index: Array,
             old_state: State,
             state: State,
             old_trial_info: TrialInfo,
             new_trial_info: TrialInfo,
+            old_item_starts: Array,
+            new_item_starts: Array,
+            item_goals: Array,
         ) -> Array:
             """compute each agent reward to be vmap
 
@@ -560,18 +737,32 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
                 state (State): agent current step state
                 old_trial_info (TrialInfo): old trial information
                 new_trial_info (TrialInfo): new trial information
+                old_item_starts (Array): old item start position
+                new_item_starts (Array): new item start position
+                item_goals (Array): item goal position
 
             Returns:
                 Array: reward for one agent
             """
             solve_rew = _compute_solve_rew(old_state, old_trial_info, new_trial_info)[0]
 
+            # dist reward
+            carry_dist = _compute_distance(
+                agent_index,
+                old_item_starts,
+                new_item_starts,
+                item_goals,
+                old_state.load_item_id,
+                state.load_item_id,
+            )
+            dist_rew = carry_dist * env_info.dist_reward
+
             # life penalty
             is_life_end = state.life[agent_index] < 0
             life_penalty = is_life_end * env_info.life_penalty
 
             not_finished = jnp.logical_not(old_trial_info.agent_collided[agent_index])
-            return (solve_rew + life_penalty) * not_finished
+            return (solve_rew + dist_rew + life_penalty) * not_finished
 
         agent_collided = jnp.logical_or(agent_collided, trial_info.agent_collided)
         item_collided = jnp.logical_or(item_collided, trial_info.item_collided)
@@ -617,8 +808,17 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
             is_success=is_success,
         )
 
-        rews = jax.vmap(_compute_rew, in_axes=(0, None, None, None, None))(
-            agent_index, old_state, state, trial_info, new_trial_info
+        rews = jax.vmap(
+            _compute_rew, in_axes=(0, None, None, None, None, None, None, None)
+        )(
+            agent_index,
+            old_state,
+            state,
+            trial_info,
+            new_trial_info,
+            old_item_starts,
+            new_item_starts,
+            item_goals,
         )
 
         # compute done
@@ -779,3 +979,24 @@ def _build_respawn_items(env_info: EnvInfo) -> Callable:
         return carry.key, state, task_info
 
     return jax.jit(_respawn_item)
+
+
+def _build_check_collide_with_agent_item(env_info: EnvInfo, agent_info: AgentInfo):
+    all_rads = jnp.concatenate((agent_info.rads, env_info.item_rads), axis=0)
+
+    def _check_collide_with_agent_item(own_pos: Array, all_pos: Array):
+        dist_to_agent_item = (
+            jnp.linalg.norm(all_pos - own_pos, axis=1) - all_rads.flatten()
+        )
+        assert_shape(dist_to_agent_item, (env_info.num_agents + env_info.num_items,))
+        return jnp.any(dist_to_agent_item < all_rads.flatten())
+
+    return jax.jit(_check_collide_with_agent_item)
+
+
+def _build_check_collide_with_obs(agent_info: AgentInfo):
+    def _check_collide_with_obs(pos: Array, sdf: Array):
+        dist_to_obs = _get_obstacle_dist(pos, sdf)
+        return dist_to_obs < agent_info.rads[0][0]
+
+    return jax.jit(_check_collide_with_obs)

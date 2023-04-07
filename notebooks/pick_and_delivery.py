@@ -8,13 +8,14 @@ from jaxman.utils import compute_agent_action
 from omegaconf import OmegaConf
 
 config = hydra.utils.instantiate(
-    OmegaConf.load("scripts/config/env/pick_and_delivery/grid.yaml")
+    OmegaConf.load("scripts/config/env/pick_and_delivery/continuous.yaml")
 )
-config.level = 0
-config.map_size = 10
-config.num_agents = 1
+config.level = 1
+config.map_size = 128
+config.num_agents = 3
 config.num_items = 4
-config.dist_reward = 0
+config.dist_reward = 0.05
+config.is_discrete = False
 env = JaxPandDEnv(config)
 # plt.imshow(env.render())
 key = jax.random.PRNGKey(0)
@@ -30,7 +31,7 @@ env.state = env.state._replace(
 fig, axes = plt.subplots(1, 10, figsize=(21, 3))
 for i in range(10):
     key, subkey = jax.random.split(key)
-    actions = jax.random.choice(subkey, 6, (config.num_agents,))
+    actions = jnp.array([[0.5, 0.2, 0], [0.1, -0.1, 0], [1.0, 1.0, 1]])
     # actions = compute_agent_action(["RIGHT","LEFT"])
     obs, rew, done, trial_info = env.step(actions)
     print(f"rew:{rew}, act:{actions}, done:{done}")

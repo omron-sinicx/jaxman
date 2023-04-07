@@ -39,12 +39,11 @@ def render_map(
             task_type,
         )
     else:
-        starts = state.pos
         if high_resolution:
-            img = render_continuous_map(starts, goals, rads, occupancy, state_traj)
+            img = render_continuous_map(state, goals, rads, occupancy, state_traj)
         else:
             img = render_simple_continuous_map(
-                starts, goals, rads, occupancy, state_traj
+                state, goals, rads, occupancy, state_traj, task_type
             )
     return img
 
@@ -88,15 +87,23 @@ def render_gif(
                 task_type,
             )
         else:
-            pass
-            starts = state.pos
             if high_quality:
                 bg = render_continuous_map(
-                    starts, goals, rads, task_info.obs.occupancy, state_traj[t:]
+                    state,
+                    goals,
+                    rads,
+                    task_info.obs.occupancy,
+                    state_traj[t:],
+                    task_type,
                 )
             else:
                 bg = render_simple_continuous_map(
-                    starts, goals, rads, task_info.obs.occupancy, state_traj[t:]
+                    state,
+                    goals,
+                    rads,
+                    task_info.obs.occupancy,
+                    state_traj[t:],
+                    task_type,
                 )
         full_obs.append(bg.copy())
 

@@ -114,6 +114,7 @@ class Instance:
             occupancy_map=self.obs.occupancy,
             sdf_map=self.obs.sdf,
             edges=self.obs.edges,
+            item_rads=0,
             fov_r=int(self.fov_r),
             comm_r=self.comm_r,
             num_scans=int(self.num_scans),

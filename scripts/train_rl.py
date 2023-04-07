@@ -73,7 +73,6 @@ def main(config):
             )
         else:
             target_entropy = -env.action_space.shape[0] / 2
-        # target_entropy = -action_space.n/2
         learner = Learner.remote(
             buffer,
             agent,
@@ -132,9 +131,9 @@ def main(config):
         evaluator.evaluate.remote(config.train.eval_iters)
         done = False
 
-        # while not done:
-        #     done = ray.get(evaluator.is_eval_done.remote())
-        #     time.sleep(0.5)
+        while not done:
+            done = ray.get(evaluator.is_eval_done.remote())
+            time.sleep(0.5)
 
         ray.kill(rollout_worker)
         ray.kill(evaluator)

@@ -246,7 +246,7 @@ def _build_get_obs_pos(env_info: EnvInfo, agent_info: AgentInfo):
             get flatten neighboring obstacles and agent position
 
             Args:
-                state (AgentState): agent's current state
+                state (Union[AgentState, State]): agent and environment current state
                 obs_map (Array): obstacle map. obs_map is added One padding
 
             Returns:
@@ -266,19 +266,22 @@ def _build_get_obs_pos(env_info: EnvInfo, agent_info: AgentInfo):
         return jax.jit(_get_obs_and_agent_pos)
 
     def _build_get_continous_obs_pos(env_info: EnvInfo, agent_info: AgentInfo):
-        rads = jnp.array(agent_info.rads)
+        if env_info.env_name == "navigation":
+            rads = jnp.array(agent_info.rads)
+        else:
+            rads = jnp.concatenate((agent_info.rads, env_info.item_rads), axis=0)
         num_scans = env_info.num_scans
         scan_range = env_info.scan_range
         agent_index = jnp.arange(env_info.num_agents)
 
         def _get_obs_and_agent_pos(
-            state: AgentState, all_state: AgentState, edges: Array, agent_index: Array
+            state: AgentState, all_pos: Array, edges: Array, agent_index: Array
         ) -> Array:
             """get obstacle and other agent position as lidar scan for agent_index th agent.
 
             Args:
                 state (AgentState): agent state
-                all_state (AgentState): all agent state
+                all_pos (Array): all agent positions
                 edges (Array): obstacles edges
                 agent_index (Array): agent index
 
@@ -286,8 +289,8 @@ def _build_get_obs_pos(env_info: EnvInfo, agent_info: AgentInfo):
                 Array: lidar scan of neighboring obstacles and agent
             """
             rads_wo_self = rads.at[agent_index].set(0)
-            top_left = all_state.pos - rads_wo_self
-            bottom_right = all_state.pos + rads_wo_self
+            top_left = all_pos - rads_wo_self
+            bottom_right = all_pos + rads_wo_self
             top_right = jnp.hstack((top_left[:, 0:1], bottom_right[:, 1:2]))
             bottom_left = jnp.hstack((bottom_right[:, 0:1], top_left[:, 1:2]))
             a = jnp.stack((top_left, bottom_left), axis=1)
@@ -299,10 +302,19 @@ def _build_get_obs_pos(env_info: EnvInfo, agent_info: AgentInfo):
             scans = get_scans(state.pos, state.rot, edges, num_scans, scan_range)
             return scans
 
-        def _get_all_agent_obs_agent_pos(state: AgentState, edges: Array) -> Array:
+        def _get_all_agent_obs_agent_pos(
+            state: Union[AgentState, State], edges: Array
+        ) -> Array:
             """get obstacle and other agent position"""
+            if env_info.env_name == "navigation":
+                all_pos = state.pos
+            else:
+                all_pos = jnp.concatenate(
+                    (state.agent_state.pos, state.item_pos), axis=0
+                )
+                state = state.agent_state
             scans = jax.vmap(_get_obs_and_agent_pos, in_axes=(0, None, None, 0))(
-                state, state, edges, agent_index
+                state, all_pos, edges, agent_index
             )
             return scans
 

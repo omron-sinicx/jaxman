@@ -53,10 +53,14 @@ def create_agent(
 
 
 def build_sample_agent_action(
-    actor_fn: Callable, is_discrete: bool, evaluate: bool, model_config: DictConfig
+    actor_fn: Callable,
+    is_discrete: bool,
+    env_name: str,
+    evaluate: bool,
+    model_config: DictConfig,
 ):
     if model_config.name == "sac":
-        return build_sample_sac_action(actor_fn, is_discrete, evaluate)
+        return build_sample_sac_action(actor_fn, is_discrete, env_name, evaluate)
     else:
         return build_sample_dqn_action(actor_fn, evaluate, model_config.use_maxmin_dqn)
 
