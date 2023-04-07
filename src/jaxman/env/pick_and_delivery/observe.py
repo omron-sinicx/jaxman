@@ -81,7 +81,7 @@ def _build_observe(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
             lambda a, b, c: jnp.concatenate((a, b, c), -1), in_axes=[0, None, None]
         )(
             relative_item_positions,
-            task_info.item_goals,
+            task_info.item_goals + jnp.array([0, 1]),
             jnp.expand_dims(state.item_time, -1),
         )
 
@@ -159,7 +159,7 @@ def _build_compute_item_goals(env_info):
             Array: item goals
         """
         is_carrying_item = load_item_id < num_items
-        item_goal = item_goals[load_item_id]
+        item_goal = item_goals[load_item_id] + jnp.array([0, 1])
         return item_goal * is_carrying_item
 
     def _compute_item_goals(load_item_id: Array, item_goals: Array) -> Array:

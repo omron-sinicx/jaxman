@@ -10,6 +10,7 @@ from typing import Union
 from chex import Array
 from jaxman.env import AgentState, State, TaskInfo, TrialInfo
 
+from .continuous_viz import render_continuous_map, render_simple_continuous_map
 from .discrete_viz import render_env
 
 
@@ -88,15 +89,15 @@ def render_gif(
             )
         else:
             pass
-            # starts = state.pos
-            # if high_quality:
-            #     bg = render_continuous_map(
-            #         starts, goals, rads, occupancy, state_traj[t:]
-            #     )
-            # else:
-            #     bg = render_simple_continuous_map(
-            #         starts, goals, rads, occupancy, state_traj[t:]
-            #     )
+            starts = state.pos
+            if high_quality:
+                bg = render_continuous_map(
+                    starts, goals, rads, task_info.obs.occupancy, state_traj[t:]
+                )
+            else:
+                bg = render_simple_continuous_map(
+                    starts, goals, rads, task_info.obs.occupancy, state_traj[t:]
+                )
         full_obs.append(bg.copy())
 
     return full_obs

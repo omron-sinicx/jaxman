@@ -87,40 +87,40 @@ def cross_road(map_size: int, num_road: int):
 
 def room(map_size: int, level: int) -> jnp.ndarray:
     image = np.zeros((map_size, map_size))
-    # delta = int(map_size / (level))
-    # door_width = int(map_size / 30)
-    # door_width2 = int(map_size / 25)
+    delta = int(map_size / (level))
+    door_width = int(map_size / 30)
+    door_width2 = int(map_size / 25)
 
-    center = int(map_size / 2)
-    image[center : center + 1, :] = 1
-    image[:, center : center + 2] = 0
+    if map_size < 50:
+        center = int(map_size / 2)
+        image[center, :] = 1
+        image[:, center - 1 : center + 1] = 0
+    elif level == 1:
+        door_width = int(map_size / 35)
+        door_width2 = int(map_size / 25)
+        center = int(map_size / 2)
+        image[center - 1 : center + 1, :] = 1
 
-    # if level == 1:
-    #     door_width = int(map_size / 35)
-    #     door_width2 = int(map_size / 25)
-    #     center = int(map_size / 2)
-    #     image[center - 1 : center + 1, :] = 1
-
-    #     image[:, :door_width2] = 0
-    #     image[:, center - door_width2 : center + door_width2] = 0
-    #     image[:, -door_width2:] = 0
-    # else:
-    #     for i in range(level - 1):
-    #         pos = delta * (i + 1)
-    #         image[pos - 1 : pos + 1, :] = 1
-    #         image[:, pos - 1 : pos + 1] = 1
-    #     for i in range(level + 1):
-    #         pos0 = delta * (i + 1)
-    #         door_pos = int(delta * (i + 0.5))
-    #         image[door_pos - door_width : door_pos + door_width, :] = 0
-    #         image[:, door_pos - door_width : door_pos + door_width] = 0
-    #         for j in range(level - 1):
-    #             if i < (level - 1):
-    #                 pos1 = delta * (j + 1)
-    #                 image[
-    #                     pos0 - door_width2 : pos0 + door_width2,
-    #                     pos1 - door_width2 : pos1 + door_width2,
-    #                 ] = 0
+        image[:, :door_width2] = 0
+        image[:, center - door_width2 : center + door_width2] = 0
+        image[:, -door_width2:] = 0
+    else:
+        for i in range(level - 1):
+            pos = delta * (i + 1)
+            image[pos - 1 : pos + 1, :] = 1
+            image[:, pos - 1 : pos + 1] = 1
+        for i in range(level + 1):
+            pos0 = delta * (i + 1)
+            door_pos = int(delta * (i + 0.5))
+            image[door_pos - door_width : door_pos + door_width, :] = 0
+            image[:, door_pos - door_width : door_pos + door_width] = 0
+            for j in range(level - 1):
+                if i < (level - 1):
+                    pos1 = delta * (j + 1)
+                    image[
+                        pos0 - door_width2 : pos0 + door_width2,
+                        pos1 - door_width2 : pos1 + door_width2,
+                    ] = 0
 
     # add frame
     image[:, 0] = 1
