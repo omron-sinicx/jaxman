@@ -36,6 +36,7 @@ class LogResult:
         self.total_episodes = 0
         self.total_updates = 0
         self.writer = writer
+        self.env_name = config.env.env_name
         # Path("./data").mkdir(parents=True, exist_ok=True)
         # self.f = open(f"./data/{config.seed}.csv","w",)
         # self.csv_writer = csv.writer(self.f)
@@ -94,10 +95,11 @@ class LogResult:
                 # )
                 solved = sum(trial_info[i].solved)
                 self.writer.add_scalar("evaluation/solved", solved, self.total_episodes)
-                excess_move = np.mean(trial_info[i].excess_move)
-                self.writer.add_scalar(
-                    "evaluation/excess_move", excess_move, self.total_episodes
-                )
+                if self.env_name == "pick_and_delivery":
+                    excess_move = np.mean(trial_info[i].excess_move)
+                    self.writer.add_scalar(
+                        "evaluation/excess_move", excess_move, self.total_episodes
+                    )
                 # timeout = sum(trial_info[i].timeout)
                 # self.writer.add_scalar(
                 #     "evaluation/timeout", timeout, self.total_episodes
