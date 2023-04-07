@@ -10,6 +10,7 @@ import jax
 import jax.numpy as jnp
 from chex import Array
 
+from ...planner.dwa import create_planner
 from ..base_observe import (
     _build_compute_neighbor_mask,
     _build_compute_relative_positions,
@@ -41,6 +42,7 @@ def _build_observe(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
     _compute_item_time = _build_compute_item_times(env_info)
     _compute_item_goals = _build_compute_item_goals(env_info)
     _compute_hold_item_info = _build_compute_hold_item_info(env_info)
+    _planner = create_planner(env_info, agent_info)
 
     def _observe(
         state: State, task_info: TaskInfo, trial_info: TrialInfo
@@ -63,6 +65,7 @@ def _build_observe(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         life = state.life.reshape(-1, 1)
         is_hold_item = (state.load_item_id < num_items).reshape(-1, 1).astype(int)
         item_time = _compute_item_time(state.load_item_id, state.item_time)
+        item_starts = _compute_item_goals(state.load_item_id, task_info.item_starts)
         item_goals = _compute_item_goals(state.load_item_id, task_info.item_goals)
 
         # other agent communication
@@ -95,6 +98,15 @@ def _build_observe(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
             relative_item_positions[:, :, :2], not_finished_items
         )
 
+        # Classical planner action
+        if is_discrete:
+            planner_act = None
+        else:
+            planner_act = (
+                _planner._act(state.agent_state, item_goals, task_info.obs.sdf)
+                * is_hold_item
+            )
+
         return AgentObservation(
             agent_state=state.agent_state,
             obs_scans=obs_pos,
@@ -108,7 +120,9 @@ def _build_observe(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
             masks=agent_masks,
             item_masks=item_masks,
             item_time=item_time,
+            item_starts=item_starts,
             item_goals=item_goals,
+            planner_act=planner_act,
         )
 
     return jax.jit(_observe)

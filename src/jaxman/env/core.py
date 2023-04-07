@@ -24,6 +24,7 @@ class EnvInfo(NamedTuple):
     occupancy_map: Optional[Array]
     sdf_map: Optional[Array]
     edges: Optional[Array]
+    item_rads: Array
     fov_r: int
     comm_r: float
     num_scans: int

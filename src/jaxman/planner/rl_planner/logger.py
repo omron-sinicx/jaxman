@@ -89,10 +89,10 @@ class LogResult:
             for i in range(len(trial_info)):
                 self.total_episodes += 1
                 ##### trial information #####
-                # collided = sum(trial_info[i].collided)
-                # self.writer.add_scalar(
-                #     "evaluation/collided", collided, self.total_episodes
-                # )
+                collided = sum(trial_info[i].agent_collided)
+                self.writer.add_scalar(
+                    "evaluation/collided", collided, self.total_episodes
+                )
                 solved = sum(trial_info[i].solved)
                 self.writer.add_scalar("evaluation/solved", solved, self.total_episodes)
                 if self.env_name == "pick_and_delivery":

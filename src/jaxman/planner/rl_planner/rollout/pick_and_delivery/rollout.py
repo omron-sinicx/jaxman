@@ -52,6 +52,7 @@ class Carry(NamedTuple):
 
         num_agents = env_info.num_agents
         num_items = env_info.num_items
+        num_overwrite = min(num_agents, num_items)
         (
             agent_starts,
             agent_start_rots,
@@ -68,10 +69,11 @@ class Carry(NamedTuple):
             is_biased_sample=env_info.is_biased_sample,
         )
         is_item_loaded = jnp.expand_dims(jnp.arange(num_items) < num_agents, -1)
-        item_starts = (item_starts + is_item_loaded * 10000).astype(int)
+        item_starts = item_starts.at[:num_overwrite].set(agent_starts[:num_overwrite])
         task_info = TaskInfo(
             agent_starts, agent_start_rots, item_starts, item_goals, obs
         )
+        item_pos = item_starts + is_item_loaded * 1000
         trial_info = TrialInfo().reset(env_info.num_agents, env_info.num_items)
         agent_state = AgentState(
             pos=task_info.starts,
@@ -83,7 +85,7 @@ class Carry(NamedTuple):
             agent_state=agent_state,
             load_item_id=jnp.arange(num_agents, dtype=int),
             life=jnp.ones(num_agents, dtype=int) * env_info.max_life,  # life
-            item_pos=item_starts,
+            item_pos=item_pos,
             item_time=jnp.zeros(num_items, dtype=int),
         )
         observations = _observe(state, task_info, trial_info)
@@ -97,7 +99,7 @@ class Carry(NamedTuple):
             actions = jnp.zeros((num_agents,))
         else:
             # TODO: define continous aciton space
-            actions = jnp.zeros((num_agents, 2))
+            actions = jnp.zeros((num_agents, 3))
         experience = Experience.reset(
             num_agents,
             env_info.timeout,
@@ -144,6 +146,7 @@ def build_rollout_episode(
     Returns:
         Callable: jit-compiled rollout episode function
     """
+    is_discrete = instance.is_discrete
     use_maxmin_dqn = model_config.use_maxmin_dqn
     env_info, agent_info, _ = instance.export_info()
     _step = _build_rollout_step(
@@ -158,7 +161,7 @@ def build_rollout_episode(
         env_info, agent_info, actor_fn, use_maxmin_dqn
     )
     _sample_actions = build_sample_agent_action(
-        actor_fn, instance.is_discrete, evaluate, model_config
+        actor_fn, instance.is_discrete, instance.env_name, evaluate, model_config
     )
 
     def _rollout_episode(
@@ -183,7 +186,14 @@ def build_rollout_episode(
             not_finished_agent = ~carry.dones
             if random_action:
                 key, subkey = jax.random.split(carry.key)
-                actions = jax.random.choice(subkey, 6, (env_info.num_agents,))
+                if is_discrete:
+                    actions = jax.random.choice(subkey, 6, (env_info.num_agents,))
+                else:
+                    actions = jnp.clip(
+                        jax.random.normal(subkey, shape=(env_info.num_agents, 3)),
+                        a_min=-1,
+                        a_max=1,
+                    )
             else:
                 key, actions = _sample_actions(
                     actor_params, carry.observations, carry.key

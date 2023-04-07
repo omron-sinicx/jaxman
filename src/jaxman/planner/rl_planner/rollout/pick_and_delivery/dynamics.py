@@ -39,7 +39,7 @@ def _build_compute_agent_intention(
     _compute_relative_pos = _build_get_relative_positions(env_info)
 
     if not is_discrete:
-        comm_dim = 10  # (rel_pos, rot, vel, ang) * 2
+        comm_dim = 11  # (rel_pos, rot, vel, ang) * 2
     elif env_info.is_diff_drive:
         comm_dim = 6  # (rel_pos, rot) * 2
     else:
@@ -83,7 +83,7 @@ def _build_compute_agent_intention(
             actions = means
 
         # compute relative position
-        next_possible_state = _compute_next_state(state, actions, task_info)
+        next_possible_state, _ = _compute_next_state(state, actions, task_info)
 
         intentions = _compute_relative_pos(
             state.agent_state, next_possible_state.agent_state

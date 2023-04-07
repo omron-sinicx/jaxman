@@ -142,21 +142,22 @@ class DWAPlanner:
 
             return action
 
-        def act(state: AgentState, task_info: TaskInfo) -> Array:
+        def act(state: AgentState, goals: Array, sdf: Array) -> Array:
             """
             Plan next step based on the current state and task information
 
             Args:
                 state (AgentState): current state
-                task_info (TaskInfo): task information
+                goal (Array): goal potitions
+                sdf (Array): sdf map
 
             Returns:
                 AgentAction: next action
             """
             return jax.vmap(_act, in_axes=(0, 0, None, 0, 0, None))(
                 state,
-                task_info.goals,
-                task_info.obs.sdf,
+                goals,
+                sdf,
                 self.agent_info,
                 jnp.arange(state.pos.shape[0]),
                 state,

@@ -157,18 +157,18 @@ def main(config):
             )
             evaluator.run.remote()
             counter = 0
-    # evaluator.evaluate.remote(config.train.eval_iters)
+    evaluator.evaluate.remote(config.train.eval_iters)
     done = False
+
+    while not done:
+        done = ray.get(evaluator.is_eval_done.remote())
+        time.sleep(0.5)
 
     ray.kill(rollout_worker)
     ray.kill(evaluator)
     ray.kill(learner)
     ray.kill(buffer)
     writer.close()
-
-    for map_size in range(config.min_map_size, config.max_map_size + 1):
-        config.env.map_size = map_size
-        config.env.num_items += 1
 
 
 if __name__ == "__main__":

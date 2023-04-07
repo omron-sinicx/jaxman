@@ -121,7 +121,7 @@ def build_rollout_episode(
     _observe = _build_observe(env_info, agent_info)
     _compute_intentions = _build_compute_agent_intention(env_info, agent_info, actor_fn)
     _sample_actions = build_sample_agent_action(
-        actor_fn, instance.is_discrete, evaluate, model_config
+        actor_fn, instance.is_discrete, instance.env_name, evaluate, model_config
     )
 
     def _rollout_episode(

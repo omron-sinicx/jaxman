@@ -46,15 +46,15 @@ class JaxPandDEnv(gym.Env):
             self.act_space = Discrete(6)
         else:
             self.act_space = Box(
-                low=np.array([-1.0, -1.0], dtype=np.float32),
-                high=np.array([1.0, 1.0], dtype=np.float32),
-                shape=(2,),
+                low=np.array([-1.0, -1.0, -1.0], dtype=np.float32),
+                high=np.array([1.0, 1.0, 1.0], dtype=np.float32),
+                shape=(3,),
                 dtype=np.float32,
             )
         if not self.is_discrete:
-            comm_dim = 10  # (rel_pos, rot, vel, ang) * 2
+            comm_dim = 11  # (rel_pos, rot, vel, ang) * 2 + life
         elif self.is_diff_drive:
-            comm_dim = 6  # (rel_pos, rot) * 2
+            comm_dim = 7  # (rel_pos, rot) * 2 + life
         else:
             comm_dim = 5  # (rel_pos,) * 2 + life
         if self.use_hold_item_info:
@@ -183,4 +183,5 @@ class JaxPandDEnv(gym.Env):
         self.task_info = task_info
         self.trial_info = info
         obs = self._observe(state, self.task_info, self.trial_info)
+        self.obs = obs
         return obs, rew, done, info

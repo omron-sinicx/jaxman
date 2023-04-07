@@ -27,6 +27,7 @@ class Instance:
     max_vels: Array
     max_ang_vels: Array
     rads: Array
+    item_rads: Array
     goal_rads: Array
     max_life: int
     obs: ObstacleMap
@@ -76,6 +77,7 @@ class Instance:
             [[config.max_ang_acc * jnp.pi] for _ in range(self.num_agents)]
         )
         self.rads = jnp.array([[config.rad] for _ in range(self.num_agents)])
+        self.item_rads = jnp.array([[config.rad] for _ in range(self.num_items)])
         self.goal_rads = jnp.array([[config.goal_rad] for _ in range(self.num_agents)])
         self.max_life = config.max_life
         self.fov_r = config.fov_r
@@ -152,6 +154,7 @@ class Instance:
             occupancy_map=self.obs.occupancy,
             sdf_map=self.obs.sdf,
             edges=self.obs.edges,
+            item_rads=self.item_rads,
             fov_r=int(self.fov_r),
             comm_r=self.comm_r,
             num_scans=int(self.num_scans),

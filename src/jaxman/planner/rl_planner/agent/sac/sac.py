@@ -150,7 +150,9 @@ def _update_sac_jit(
     )
 
 
-def build_sample_action(actor_fn: Callable, is_discrete: bool, evaluate: bool):
+def build_sample_action(
+    actor_fn: Callable, is_discrete: bool, env_name: str, evaluate: bool
+):
     def sample_action(
         params: FrozenDict,
         observations: AgentObservation,
@@ -174,18 +176,34 @@ def build_sample_action(actor_fn: Callable, is_discrete: bool, evaluate: bool):
             else:
                 means, log_stds = actor_fn({"params": params}, obs)
                 actions = means
+                # means, log_stds, action_probs = actor_fn({"params": params}, obs)
+                # cont_actions = means
+                # dis_actions = jnp.argmax(action_probs, axis=-1).reshape(-1,1)
+                # actions = jnp.concatenate((cont_actions, dis_actions), axis=-1)
         else:
+            subkey, key = jax.random.split(key)
             if is_discrete:
                 action_probs = actor_fn({"params": params}, obs)
                 action_dist = tfd.Categorical(probs=action_probs)
+                actions = action_dist.sample(seed=subkey)
             else:
                 means, log_stds = actor_fn({"params": params}, obs)
                 action_dist = tfd.MultivariateNormalDiag(
                     loc=means, scale_diag=jnp.exp(log_stds)
                 )
+                actions = action_dist.sample(seed=subkey)
 
-            subkey, key = jax.random.split(key)
-            actions = action_dist.sample(seed=subkey)
+                # means, log_stds, action_probs = actor_fn({"params": params}, obs)
+                # action_dist = tfd.MultivariateNormalDiag(
+                #     loc=means, scale_diag=jnp.exp(log_stds)
+                # )
+                # dis_action_dist = tfd.Categorical(probs=action_probs)
+                # subkey, key = jax.random.split(key)
+                # cont_actions = action_dist.sample(seed=subkey)
+                # dis_actions = dis_action_dist.sample(seed=subkey).reshape(-1,1)
+                # actions = jnp.concatenate((cont_actions, dis_actions), axis=-1)
+        # if env_name == "pick_and_delivery":
+        #     actions = actions.at[:, -1].set(actions[:, -1] > 0)
         return key, actions
 
     return jax.jit(sample_action)
@@ -224,7 +242,7 @@ def restore_sac_actor(
         actor_params = checkpoints.restore_checkpoint(
             ckpt_dir=restore_dir,
             target=sac.actor,
-            prefix="grid_actor",
+            prefix="sac_grid_actor",
         ).params
     actor = sac.actor.replace(params=actor_params)
     return sac._replace(actor=actor)

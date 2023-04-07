@@ -159,11 +159,11 @@ def sample_random_agent_item_pos(
     Returns:
         Tuple[Array, Array]: sampled agent start and goal
     """
-    start_key, goal_key = jax.random.split(key)
+    agent_key, item_key = jax.random.split(key)
     max_rad = jnp.max(rads.flatten())
     # if sample_type == "uniform":
     agent_starts = sample_uniform(
-        start_key,
+        agent_key,
         num_agents,
         max_rad,
         obs,
@@ -186,10 +186,20 @@ def sample_random_agent_item_pos(
         map_size = obs.sdf.shape[0]
         agent_starts = jnp.minimum((agent_starts * map_size).astype(int), map_size - 1)
         item_starts, item_goals = _sample_item(
-            key, agent_starts, obs.occupancy, num_items, map_size, is_biased_sample
+            item_key, agent_starts, obs.occupancy, num_items, map_size, is_biased_sample
         )
     else:
-        NotImplementedError
+        item_pos = sample_uniform(
+            item_key,
+            num_items * 2,
+            max_rad,
+            obs,
+            is_discrete,
+            no_overlap,
+            num_max_trials,
+        )
+        item_starts = item_pos[:num_items]
+        item_goals = item_pos[num_items:]
     return agent_starts, item_starts, item_goals
 
 

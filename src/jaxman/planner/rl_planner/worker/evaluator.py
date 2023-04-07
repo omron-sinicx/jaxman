@@ -197,8 +197,14 @@ class Evaluator:
         Args:
             eval_iters (int): number of evaluation episode
         """
-        actor_params, _ = self._update_parameters()
+        # update parameters
+        (
+            actor_params,
+            _,
+            _,
+        ) = self._update_parameters()
         reward = []
+        solved = []
         success = []
         makespan = []
         sum_of_cost = []
@@ -209,7 +215,8 @@ class Evaluator:
             reward.append(carry.rewards.mean())
             trial_info = carry.trial_info
             success.append(int(trial_info.is_success))
-            if trial_info.is_success:
+            solved.append(int(np.mean(trial_info.solved)))
+            if trial_info.is_success and self.env_name == "navigation":
                 makespan.append(trial_info.makespan)
                 sum_of_cost.append(trial_info.sum_of_cost)
 
@@ -217,10 +224,17 @@ class Evaluator:
         reward_std = bs.bootstrap(np.array(reward), stat_func=bs_stats.std)
         success_mean = bs.bootstrap(np.array(success), stat_func=bs_stats.std)
         success_std = bs.bootstrap(np.array(success), stat_func=bs_stats.std)
-        makespan_mean = bs.bootstrap(np.array(makespan), stat_func=bs_stats.mean)
-        makespan_std = bs.bootstrap(np.array(makespan), stat_func=bs_stats.std)
-        sum_of_cost_mean = bs.bootstrap(np.array(sum_of_cost), stat_func=bs_stats.mean)
-        sum_of_cost_std = bs.bootstrap(np.array(sum_of_cost), stat_func=bs_stats.std)
+        solved_mean = bs.bootstrap(np.array(solved), stat_func=bs_stats.std)
+        solved_std = bs.bootstrap(np.array(solved), stat_func=bs_stats.std)
+        if self.env_name == "navigation":
+            makespan_mean = bs.bootstrap(np.array(makespan), stat_func=bs_stats.mean)
+            makespan_std = bs.bootstrap(np.array(makespan), stat_func=bs_stats.std)
+            sum_of_cost_mean = bs.bootstrap(
+                np.array(sum_of_cost), stat_func=bs_stats.mean
+            )
+            sum_of_cost_std = bs.bootstrap(
+                np.array(sum_of_cost), stat_func=bs_stats.std
+            )
 
         f = open("eval.cvs", "w")
         csv_writer = csv.writer(f)
@@ -236,6 +250,15 @@ class Evaluator:
         )
         csv_writer.writerow(
             [
+                "solved",
+                solved_mean.value,
+                solved_mean.lower_bound,
+                solved_mean.upper_bound,
+                solved_std.value,
+            ]
+        )
+        csv_writer.writerow(
+            [
                 "success",
                 success_mean.value,
                 success_mean.lower_bound,
@@ -243,24 +266,25 @@ class Evaluator:
                 success_std.value,
             ]
         )
-        csv_writer.writerow(
-            [
-                "makespan",
-                makespan_mean.value,
-                makespan_mean.lower_bound,
-                makespan_mean.upper_bound,
-                makespan_std.value,
-            ]
-        )
-        csv_writer.writerow(
-            [
-                "sum_of_cost",
-                sum_of_cost_mean.value,
-                sum_of_cost_mean.lower_bound,
-                sum_of_cost_mean.upper_bound,
-                sum_of_cost_std.value,
-            ]
-        )
+        if self.env_name == "navigation":
+            csv_writer.writerow(
+                [
+                    "makespan",
+                    makespan_mean.value,
+                    makespan_mean.lower_bound,
+                    makespan_mean.upper_bound,
+                    makespan_std.value,
+                ]
+            )
+            csv_writer.writerow(
+                [
+                    "sum_of_cost",
+                    sum_of_cost_mean.value,
+                    sum_of_cost_mean.lower_bound,
+                    sum_of_cost_mean.upper_bound,
+                    sum_of_cost_std.value,
+                ]
+            )
         f.close()
         self.done = True
 

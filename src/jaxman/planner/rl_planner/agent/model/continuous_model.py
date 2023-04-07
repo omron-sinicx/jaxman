@@ -88,7 +88,7 @@ class Actor(fnn.Module):
     hidden_dim: int
     msg_dim: int
     action_dim: int
-    is_residual_net: bool = False
+    is_residual_net: bool = True
     log_std_min: float = None
     log_std_max: float = None
 
@@ -116,10 +116,16 @@ class Actor(fnn.Module):
             # residual network
             # apply clip to avoid inf value
             planner_act = jnp.clip(
-                observations[:, -2:], a_min=-1 + epsilon, a_max=1 - epsilon
+                observations.base_observation[:, -2:],
+                a_min=-1 + epsilon,
+                a_max=1 - epsilon,
             )
             x_t = jnp.arctanh(planner_act)
-            means = jnp.tanh(means + x_t)
+            if self.action_dim == 2:
+                means = jnp.tanh(means + x_t)
+            else:
+                means = means.at[:, :2].set(means[:, :2] + x_t)
+                means = jnp.tanh(means)
         else:
             means = jnp.tanh(means)
 
@@ -132,3 +138,69 @@ class Actor(fnn.Module):
         log_stds = jnp.clip(log_stds, log_std_min, log_std_max)
 
         return means, log_stds
+
+
+class PandDActor(fnn.Module):
+    hidden_dim: int
+    msg_dim: int
+    action_dim: int
+    is_residual_net: bool = True
+    log_std_min: float = None
+    log_std_max: float = None
+
+    @fnn.compact
+    def __call__(self, observations: AgentObservation) -> Tuple[Array, Array]:
+        """
+        calculate agent action mean and log_std
+
+        Args:
+            observations (AgentObservation): NamedTuple for observation of agent. consisting of basic observations and communication
+
+        Returns:
+            Distribution: action distribution
+        """
+        # encode observation, communications and action
+        dis_encoder = ObsEncoder(self.hidden_dim, self.msg_dim)
+        dis_h = dis_encoder(observations)
+
+        cont_encoder = ObsEncoder(self.hidden_dim, self.msg_dim)
+        cont_h = cont_encoder(observations)
+
+        # discrete part
+        discrete_action_logits = fnn.Dense(self.hidden_dim)(dis_h)
+        discrete_action_logits = fnn.relu(discrete_action_logits)
+        discrete_action_logits = fnn.Dense(2)(discrete_action_logits)
+        action_probs = fnn.softmax(discrete_action_logits, axis=-1)
+
+        # mean
+        h = jnp.concatenate((cont_h, action_probs), axis=-1)
+        means = fnn.Dense(self.hidden_dim)(h)
+        means = fnn.relu(means)
+        means = fnn.Dense(self.action_dim)(means)
+
+        if self.is_residual_net:
+            # residual network
+            # apply clip to avoid inf value
+            planner_act = jnp.clip(
+                observations.base_observation[:, -2:],
+                a_min=-1 + epsilon,
+                a_max=1 - epsilon,
+            )
+            x_t = jnp.arctanh(planner_act)
+            if self.action_dim == 2:
+                means = jnp.tanh(means + x_t)
+            else:
+                means = means.at[:, :2].set(means[:, :2] + x_t)
+                means = jnp.tanh(means)
+        else:
+            means = jnp.tanh(means)
+
+        log_stds = fnn.Dense(self.hidden_dim)(h)
+        log_stds = fnn.relu(log_stds)
+        log_stds = fnn.Dense(self.action_dim)(log_stds)
+
+        log_std_min = self.log_std_min or LOG_STD_MIN
+        log_std_max = self.log_std_max or LOG_STD_MAX
+        log_stds = jnp.clip(log_stds, log_std_min, log_std_max)
+
+        return means, log_stds, action_probs

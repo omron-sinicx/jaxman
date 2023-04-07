@@ -44,7 +44,7 @@ def _build_observe(
             planner_act = None
         else:
             obs_pos = _get_obs_pos(state, task_info.obs.edges)
-            planner_act = _planner._act(state, task_info)
+            planner_act = _planner._act(state, task_info.goals, task_info.obs.sdf)
         relative_positions = _get_other_agent_infos(state, state)
         intentions = jnp.zeros_like(relative_positions)
         masks = _get_mask(relative_positions[:, :, :2], not_finished_agent)

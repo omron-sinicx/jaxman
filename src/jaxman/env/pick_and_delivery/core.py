@@ -136,7 +136,9 @@ class AgentObservation(NamedTuple):
     masks: Array
     item_masks: Array
     item_time: Array
+    item_starts: Array
     item_goals: Array
+    planner_act: Array
 
     def cat(self, as_numpy=False) -> Array:
         """
@@ -156,9 +158,12 @@ class AgentObservation(NamedTuple):
                 self.life,
                 self.is_hold_item,
                 jnp.expand_dims(self.item_time, -1),
+                self.item_starts,
                 self.item_goals,
             )
         )
+        if self.planner_act is not None:
+            ret = ret = jnp.hstack((ret, self.planner_act))
 
         num_agents = ret.shape[0]
 
@@ -197,9 +202,13 @@ class AgentObservation(NamedTuple):
                 self.life,
                 self.is_hold_item,
                 jnp.expand_dims(self.item_time, -1),
+                self.item_starts,
                 self.item_goals,
             )
         )
+        if self.planner_act is not None:
+            obs = jnp.hstack((obs, self.planner_act))
+
         comm = jnp.concatenate(
             (
                 self.relative_positions,
