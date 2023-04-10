@@ -84,9 +84,8 @@ class Carry(NamedTuple):
         state = State(
             agent_state=agent_state,
             load_item_id=jnp.arange(num_agents, dtype=int),
-            life=jnp.ones(num_agents, dtype=int) * env_info.max_life,  # life
+            life=jnp.zeros(num_agents, dtype=int),
             item_pos=item_pos,
-            item_time=jnp.zeros(num_items, dtype=int),
         )
         observations = _observe(state, task_info, trial_info)
         rewards = jnp.zeros((num_agents,))
@@ -98,7 +97,6 @@ class Carry(NamedTuple):
         if env_info.is_discrete:
             actions = jnp.zeros((num_agents,))
         else:
-            # TODO: define continous aciton space
             actions = jnp.zeros((num_agents, 3))
         experience = Experience.reset(
             num_agents,
@@ -108,7 +106,7 @@ class Carry(NamedTuple):
         )
         load_item_id_traj = jnp.zeros((env_info.timeout, env_info.num_agents))
         item_traj = jnp.zeros(
-            (env_info.timeout, env_info.num_items, 3), observations.item_info.dtype
+            (env_info.timeout, env_info.num_items, 2), observations.item_info.dtype
         )
         goal_traj = jnp.zeros(
             (env_info.timeout, env_info.num_items, 2), observations.item_info.dtype
@@ -225,10 +223,9 @@ def build_rollout_episode(
             load_item_id_traj = carry.load_item_id_traj.at[carry.episode_steps].set(
                 carry.state.load_item_id
             )
-            item_info = jnp.hstack(
-                (carry.state.item_pos, jnp.expand_dims(carry.state.item_time, -1))
+            item_traj = carry.item_traj.at[carry.episode_steps].set(
+                carry.state.item_pos
             )
-            item_traj = carry.item_traj.at[carry.episode_steps].set(item_info)
             goal_traj = carry.goal_traj.at[carry.episode_steps].set(
                 carry.task_info.item_goals
             )

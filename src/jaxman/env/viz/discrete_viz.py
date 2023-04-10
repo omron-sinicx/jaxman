@@ -60,12 +60,8 @@ def plot_collide_robot(image, x, y, color):
     return image
 
 
-def plot_item(image, x, y, color, item_time=None):
+def plot_item(image, x, y, color):
     # render "+"
-    if item_time is not None:
-        color = np.array(color) * (
-            1 - np.clip(np.array(item_time), a_min=0, a_max=100) / 200
-        )
     image[x, y] = color
     image[x + 1, y] = color
     image[x - 1, y] = color
@@ -74,11 +70,7 @@ def plot_item(image, x, y, color, item_time=None):
     return image
 
 
-def plot_carried_item(image, x, y, color, item_time=None):
-    if item_time is not None:
-        color = np.array(color) * (
-            1 - np.clip(np.array(item_time), a_min=0, a_max=100) / 200
-        )
+def plot_carried_item(image, x, y, color):
     image[x, y] = color
     return image
 
@@ -206,14 +198,11 @@ def render_pick_and_delivery(
                 int(agent_pos[loaded_agent_id, 1]),
                 int(agent_pos[loaded_agent_id, 0]),
                 color,
-                state.item_time[i],
             )
         # if item is carried or collided, item_pos is set to INF
         elif item_pos[i][0] < image.shape[0]:
             # render not carried item
-            image = plot_item(
-                image, item_pos[i, 1], item_pos[i, 0], color, state.item_time[i]
-            )
+            image = plot_item(image, item_pos[i, 1], item_pos[i, 0], color)
 
         # render item goal
         image = plot_goal(image, item_goals[i, 1], item_goals[i, 0], color)

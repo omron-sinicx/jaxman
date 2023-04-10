@@ -95,11 +95,6 @@ class LogResult:
                 )
                 solved = sum(trial_info[i].solved)
                 self.writer.add_scalar("evaluation/solved", solved, self.total_episodes)
-                if self.env_name == "pick_and_delivery":
-                    excess_move = np.mean(trial_info[i].excess_move)
-                    self.writer.add_scalar(
-                        "evaluation/excess_move", excess_move, self.total_episodes
-                    )
                 # timeout = sum(trial_info[i].timeout)
                 # self.writer.add_scalar(
                 #     "evaluation/timeout", timeout, self.total_episodes

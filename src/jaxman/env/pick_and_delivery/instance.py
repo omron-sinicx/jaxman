@@ -29,7 +29,6 @@ class Instance:
     rads: Array
     item_rads: Array
     goal_rads: Array
-    max_life: int
     obs: ObstacleMap
     fov_r: int
     comm_r: float
@@ -79,7 +78,6 @@ class Instance:
         self.rads = jnp.array([[config.rad] for _ in range(self.num_agents)])
         self.item_rads = jnp.array([[config.rad] for _ in range(self.num_items)])
         self.goal_rads = jnp.array([[config.goal_rad] for _ in range(self.num_agents)])
-        self.max_life = config.max_life
         self.fov_r = config.fov_r
         self.comm_r = config.comm_r
         self.num_scans = config.num_scans
@@ -150,7 +148,6 @@ class Instance:
             env_name="pick_and_delivery",
             num_agents=int(self.num_agents),
             num_items=self.num_items,
-            max_life=self.max_life,
             occupancy_map=self.obs.occupancy,
             sdf_map=self.obs.sdf,
             edges=self.obs.edges,

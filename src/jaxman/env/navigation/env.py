@@ -33,6 +33,7 @@ class JaxMANEnv(gym.Env):
         self.num_agents = config.num_agents
         self.is_discrete = config.is_discrete
         self.is_diff_drive = config.is_diff_drive
+        self.use_intentions = config.use_intentions
         self._inner_step = _build_inner_step(self._env_info, self._agent_info)
         self._observe = _build_observe(self._env_info, self._agent_info)
         self.obs = self.reset()
@@ -49,11 +50,13 @@ class JaxMANEnv(gym.Env):
                 dtype=np.float32,
             )
         if not self.is_discrete:
-            comm_dim = 10  # (rel_pos, rot, vel, ang) * 2
+            comm_dim = 5  # (rel_pos, rot, vel, ang) * 2
         elif self.is_diff_drive:
-            comm_dim = 6  # (rel_pos, rot) * 2
+            comm_dim = 3  # (rel_pos, rot) * 2
         else:
-            comm_dim = 4  # (rel_pos,) * 2
+            comm_dim = 2  # (rel_pos,) * 2
+        if self.use_intentions:
+            comm_dim *= 2
 
         obs_dim = (
             self.obs.cat()[0].shape[0] - comm_dim * self.num_agents - self.num_agents
