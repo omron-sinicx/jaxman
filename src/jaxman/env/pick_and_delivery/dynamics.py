@@ -76,9 +76,7 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         # update state
         movable_agents = jnp.logical_not(trial_info.agent_collided)
         masked_actions = jax.vmap(lambda a, b: a * b)(actions, movable_agents)
-        possible_next_state, new_item_starts = _compute_next_state(
-            state, masked_actions, task_info
-        )
+        possible_next_state = _compute_next_state(state, masked_actions, task_info)
 
         # update agent collision
         collided_with_obs = _check_collision_with_obs(
@@ -107,8 +105,6 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
             item_collided * is_crashable,
             item_solved,
             trial_info,
-            task_info.item_starts,
-            new_item_starts,
             task_info.item_goals,
         )
 
@@ -125,14 +121,11 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
             possible_next_state.item_pos, done_item.astype(bool)
         )
 
-        item_time = possible_next_state.item_time * jnp.logical_not(done_item)
-
         next_state = possible_next_state._replace(
-            agent_state=new_agent_state, item_pos=item_pos, item_time=item_time
+            agent_state=new_agent_state, item_pos=item_pos
         )
 
         # respawn items
-        task_info = task_info._replace(item_starts=new_item_starts)
         if env_info.is_respawn:
             key, next_state, task_info = _respawn_items(
                 key, next_state, task_info, done_item.astype(bool)
@@ -162,17 +155,11 @@ def _build_compute_next_env_state(env_info: EnvInfo, agent_info: AgentInfo) -> C
         next_agent_state = _compute_agent_next_state(
             state, actions, agent_info, task_info
         )
-        next_load_item_id, next_item_pos, item_starts = _compute_next_item_state(
+        next_load_item_id, next_item_pos = _compute_next_item_state(
             next_agent_state, actions, state.load_item_id, state.item_pos, task_info
         )
-        is_load_item = next_load_item_id < env_info.num_items
-        life = state.life - is_load_item + jnp.logical_not(is_load_item)
-        life = jnp.clip(life, a_min=-1, a_max=5)
-        item_time = state.item_time + 1
-        return (
-            State(next_agent_state, next_load_item_id, life, next_item_pos, item_time),
-            item_starts,
-        )
+        life = state.life + 1
+        return State(next_agent_state, next_load_item_id, life, next_item_pos)
 
     return jax.jit(_compute_next_env_state)
 
@@ -362,7 +349,6 @@ def _build_compute_next_item_state(
         actions: Array
         load_item_id: int
         item_pos: Array
-        item_starts: Array
         obs: ObstacleMap
 
     def _move_or_load_unload_items(i: int, carry: Carry):
@@ -476,16 +462,9 @@ def _build_compute_next_item_state(
                         can_unload * dummy_index + ~can_unload * carry.load_item_id[i]
                     )
 
-                    # if agent can unload item, item_starts is updated to the next state
-                    item_starts = carry.item_starts.at[carry.load_item_id[i]].set(
-                        can_unload * next_item_pos[carry.load_item_id[i]]
-                        + ~can_unload * carry.item_starts[carry.load_item_id[i]]
-                    )
-
                     return carry._replace(
                         item_pos=next_item_pos,
                         load_item_id=next_load_item_id,
-                        item_starts=item_starts,
                     )
 
             def load_items(i: int, carry: Carry):
@@ -532,11 +511,9 @@ def _build_compute_next_item_state(
         item_pos: Array,
         task_info: TaskInfo,
     ) -> Tuple[Array, Array]:
-        carry = Carry(
-            state, actions, load_item_id, item_pos, task_info.item_starts, task_info.obs
-        )
+        carry = Carry(state, actions, load_item_id, item_pos, task_info.obs)
         carry = jax.lax.fori_loop(0, num_agents, _move_or_load_unload_items, carry)
-        return carry.load_item_id, carry.item_pos, carry.item_starts
+        return carry.load_item_id, carry.item_pos
 
     return jax.jit(_compute_next_item_state)
 
@@ -656,8 +633,6 @@ def _build_compute_is_solved(env_info: EnvInfo, agent_info: AgentInfo):
 def _build_compute_rew_done_info(env_info: EnvInfo):
     num_items = env_info.num_items
     agent_index = jnp.arange(env_info.num_agents)
-    decay_duration = env_info.decay_end - env_info.decay_start
-    decay_scale = 1 - env_info.min_reward
 
     def _compute_rew_done_info(
         old_state: State,
@@ -666,8 +641,6 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
         item_collided: Array,
         solved: Array,
         trial_info: TrialInfo,
-        old_item_starts: Array,
-        new_item_starts: Array,
         item_goals: Array,
     ) -> Tuple[Array, Array, TrialInfo]:
         def _compute_solve_rew(
@@ -682,87 +655,31 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
                 - old_trial_info.solved[old_load_item_id]
             )
 
-            if env_info.is_decay_reward:
-                solve_rew = jnp.clip(
-                    1
-                    - decay_scale
-                    * (state.item_time[old_load_item_id] - env_info.decay_start)
-                    / decay_duration,
-                    a_min=env_info.min_reward,
-                    a_max=1,
-                )
-                solve_rew = solved * solve_rew * is_load_item
-            else:
-                solve_rew = solved * env_info.goal_reward * is_load_item
+            solve_rew = solved * env_info.goal_reward * is_load_item
 
             return solve_rew
-
-        def _compute_distance(
-            agent_index,
-            old_item_starts,
-            new_item_starts,
-            item_goals,
-            old_load_item_id,
-            new_load_item_id,
-        ):
-            old_item_id = old_load_item_id[agent_index]
-            is_unload = (old_load_item_id[agent_index] < num_items) & (
-                new_load_item_id[agent_index] >= num_items
-            )
-
-            old_distance = jnp.linalg.norm(
-                old_item_starts[old_item_id] - item_goals[old_item_id]
-            )
-            new_distance = jnp.linalg.norm(
-                new_item_starts[old_item_id] - item_goals[old_item_id]
-            )
-            carry_distance = jnp.clip(old_distance - new_distance, a_min=0)
-            return carry_distance * is_unload
 
         def _compute_rew(
             agent_index: Array,
             old_state: State,
-            state: State,
             old_trial_info: TrialInfo,
             new_trial_info: TrialInfo,
-            old_item_starts: Array,
-            new_item_starts: Array,
-            item_goals: Array,
         ) -> Array:
             """compute each agent reward to be vmap
 
             Args:
                 agent_index (Array): index of agent
                 old_state (State): agent last step state
-                state (State): agent current step state
                 old_trial_info (TrialInfo): old trial information
                 new_trial_info (TrialInfo): new trial information
-                old_item_starts (Array): old item start position
-                new_item_starts (Array): new item start position
-                item_goals (Array): item goal position
 
             Returns:
                 Array: reward for one agent
             """
             solve_rew = _compute_solve_rew(old_state, old_trial_info, new_trial_info)[0]
 
-            # dist reward
-            carry_dist = _compute_distance(
-                agent_index,
-                old_item_starts,
-                new_item_starts,
-                item_goals,
-                old_state.load_item_id,
-                state.load_item_id,
-            )
-            dist_rew = carry_dist * env_info.dist_reward
-
-            # life penalty
-            is_life_end = state.life[agent_index] < 0
-            life_penalty = is_life_end * env_info.life_penalty
-
             not_finished = jnp.logical_not(old_trial_info.agent_collided[agent_index])
-            return (solve_rew + dist_rew + life_penalty) * not_finished
+            return solve_rew * not_finished
 
         agent_collided = jnp.logical_or(agent_collided, trial_info.agent_collided)
         item_collided = jnp.logical_or(item_collided, trial_info.item_collided)
@@ -775,9 +692,6 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
         )
         # is_success = jnp.all(solved)
         is_success = False
-
-        # excess movement
-        excess_move = trial_info.excess_move + (state.life < 0).flatten().astype(int)
 
         # calculate indicator
         delivery_rate = jnp.sum(solved) / env_info.num_agents
@@ -796,7 +710,6 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
             timesteps=timesteps,
             agent_collided=agent_collided,
             item_collided=item_collided,
-            excess_move=excess_move,
             solved=solved,
             solved_time=solved_time,
             timeout=timeout,
@@ -808,17 +721,11 @@ def _build_compute_rew_done_info(env_info: EnvInfo):
             is_success=is_success,
         )
 
-        rews = jax.vmap(
-            _compute_rew, in_axes=(0, None, None, None, None, None, None, None)
-        )(
+        rews = jax.vmap(_compute_rew, in_axes=(0, None, None, None))(
             agent_index,
             old_state,
-            state,
             trial_info,
             new_trial_info,
-            old_item_starts,
-            new_item_starts,
-            item_goals,
         )
 
         # compute done

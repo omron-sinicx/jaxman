@@ -33,19 +33,22 @@ def _build_compute_agent_intention(
     num_agents = env_info.num_agents
     is_discrete = env_info.is_discrete
     is_diff_drive = env_info.is_diff_drive
+    use_intentions = env_info.use_intentions
     use_hold_item_info = env_info.use_hold_item_info
 
     _compute_next_state = _build_compute_next_env_state(env_info, agent_info)
     _compute_relative_pos = _build_get_relative_positions(env_info)
 
     if not is_discrete:
-        comm_dim = 11  # (rel_pos, rot, vel, ang) * 2
-    elif env_info.is_diff_drive:
-        comm_dim = 6  # (rel_pos, rot) * 2
+        comm_dim = 5  # (rel_pos, rot, vel, ang) * 2
+    elif is_diff_drive:
+        comm_dim = 3  # (rel_pos, rot) * 2
     else:
-        comm_dim = 5  # (rel_pos,) * 2
+        comm_dim = 2  # (rel_pos,) * 2
+    if use_intentions:
+        comm_dim *= 2
     if use_hold_item_info:
-        comm_dim += 4  # (is_hold_item, item_goal, item_time)
+        comm_dim += 3  # (is_hold_item, item_goal, item_time)
 
     dummy_comm = jnp.zeros((num_agents, 1, comm_dim))
     dummy_mask = jnp.zeros((num_agents, 1))
@@ -68,26 +71,31 @@ def _build_compute_agent_intention(
         Returns:
             Array: intentions
         """
-        observations = observations.split_observation()
-        dummy_observation = observations._replace(
-            communication=dummy_comm, agent_mask=dummy_mask
-        )
+        if use_intentions:
+            observations = observations.split_observation()
+            dummy_observation = observations._replace(
+                communication=dummy_comm, agent_mask=dummy_mask
+            )
 
-        if is_discrete:
-            action_probs = actor_fn({"params": actor_params}, dummy_observation)
-            if use_maxmin_dqn:
-                action_probs = jnp.min(action_probs, axis=1)
-            actions = jnp.argmax(action_probs, axis=-1)
+            if is_discrete:
+                action_probs = actor_fn({"params": actor_params}, dummy_observation)
+                if use_maxmin_dqn:
+                    action_probs = jnp.min(action_probs, axis=1)
+                actions = jnp.argmax(action_probs, axis=-1)
+            else:
+                means, _ = actor_fn({"params": actor_params}, dummy_observation)
+                actions = means
+
+            # compute relative position
+            next_possible_state = _compute_next_state(state, actions, task_info)
+
+            intentions = _compute_relative_pos(
+                state.agent_state, next_possible_state.agent_state
+            )
         else:
-            means, _ = actor_fn({"params": actor_params}, dummy_observation)
-            actions = means
-
-        # compute relative position
-        next_possible_state, _ = _compute_next_state(state, actions, task_info)
-
-        intentions = _compute_relative_pos(
-            state.agent_state, next_possible_state.agent_state
-        )
+            intentions = jnp.zeros(
+                shape=(num_agents, num_agents, 0), dtype=state.item_pos.dtype
+            )
         return intentions
 
     return jax.jit(_compute_agents_intentions)

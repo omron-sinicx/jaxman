@@ -110,7 +110,6 @@ class Instance:
             env_name="navigation",
             num_agents=int(self.num_agents),
             num_items=0,
-            max_life=5,
             occupancy_map=self.obs.occupancy,
             sdf_map=self.obs.sdf,
             edges=self.obs.edges,

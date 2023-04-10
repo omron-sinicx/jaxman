@@ -33,6 +33,8 @@ def _build_observe(
     Returns:
         Callable: jit-compiled observe function
     """
+    num_agents = env_info.num_agents
+    use_intentions = env_info.use_intentions
     _get_obs_pos = _build_get_obs_pos(env_info, agent_info)
     _get_other_agent_infos = _build_get_other_agent_infos(env_info)
     _get_mask = _build_compute_neighbor_mask(env_info)
@@ -46,7 +48,10 @@ def _build_observe(
             obs_pos = _get_obs_pos(state, task_info.obs.edges)
             planner_act = _planner._act(state, task_info.goals, task_info.obs.sdf)
         relative_positions = _get_other_agent_infos(state, state)
-        intentions = jnp.zeros_like(relative_positions)
+        if use_intentions:
+            intentions = jnp.zeros_like(relative_positions)
+        else:
+            intentions = jnp.zeros(shape=(num_agents, num_agents, 0))
         masks = _get_mask(relative_positions[:, :, :2], not_finished_agent)
         return AgentObservation(
             state=state,

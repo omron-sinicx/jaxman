@@ -20,7 +20,6 @@ class EnvInfo(NamedTuple):
     env_name: str
     num_agents: int
     num_items: int
-    max_life: int
     occupancy_map: Optional[Array]
     sdf_map: Optional[Array]
     edges: Optional[Array]

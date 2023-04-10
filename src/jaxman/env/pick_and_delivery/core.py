@@ -23,7 +23,6 @@ class TrialInfo(NamedTuple):
     timesteps: Array = jnp.array(0)
     agent_collided: Array = None
     item_collided: Array = None
-    excess_move: Array = None
     solved: Array = None
     solved_time: Array = None
     timeout: Array = None
@@ -40,7 +39,6 @@ class TrialInfo(NamedTuple):
             timesteps=jnp.array(0),
             agent_collided=jnp.zeros(num_agents).astype(bool),
             item_collided=jnp.zeros(num_items).astype(bool),
-            excess_move=jnp.zeros(num_agents).astype(int),
             solved=jnp.zeros(num_items).astype(int),
             solved_time=jnp.ones(num_items) * jnp.inf,
             timeout=False,
@@ -76,7 +74,6 @@ class State(NamedTuple):
     load_item_id: Array = None
     life: Array = Array
     item_pos: Array = None
-    item_time: Array = None
 
     def cat(self, as_numpy=False) -> Array:
         ret = jnp.hstack(
@@ -89,7 +86,7 @@ class State(NamedTuple):
                 jnp.expand_dims(self.load_item_id, -1),
             )
         )
-        item_ret = jnp.hstack((self.item_pos, jnp.expand_dims(self.item_time, -1)))
+        item_ret = self.item_pos
         if as_numpy:
             ret = np.array(ret)
             item_ret = np.array(item_ret)
@@ -100,9 +97,8 @@ class State(NamedTuple):
         agent_state = AgentState.from_array(agent_array[:, :-1])
         life = agent_array[:, -2]
         load_item_id = agent_array[:, -1]
-        item_pos = item_array[:, :-1]
-        item_item = item_array[:, -2]
-        return State(agent_state, load_item_id, life, item_pos, item_item)
+        item_pos = item_array
+        return State(agent_state, load_item_id, life, item_pos)
 
 
 class AgentObservation(NamedTuple):
@@ -116,12 +112,11 @@ class AgentObservation(NamedTuple):
         relative_positions (Array): relative agent positions
         intentions (Array): next step agent greedy intention (where greedy agent want to move)
         hold_item_info: Array (Array): information of items held by other agent
-        other_agent_life (Array): remaining life of other agents.
         item_info (Array): item relative positions and its goals
         masks (Array): mask to restrict agent communication to neighboring agents
         item_masks (Array): mask to restrict the item detection to neighboring item
-        item_time (Array): Elapsed time since the item spawned
         item_goal (Array): carrying item goals. if agent is not carrying item, then item_goal set to (0,0)
+        planner_act (Array): dwa planners action suggestion
     """
 
     agent_state: AgentState
@@ -131,12 +126,9 @@ class AgentObservation(NamedTuple):
     relative_positions: Array
     intentions: Array
     hold_item_info: Array
-    other_agent_life: Array
     item_info: Array
     masks: Array
     item_masks: Array
-    item_time: Array
-    item_starts: Array
     item_goals: Array
     planner_act: Array
 
@@ -157,8 +149,6 @@ class AgentObservation(NamedTuple):
                 self.obs_scans,
                 self.life,
                 self.is_hold_item,
-                jnp.expand_dims(self.item_time, -1),
-                self.item_starts,
                 self.item_goals,
             )
         )
@@ -172,7 +162,6 @@ class AgentObservation(NamedTuple):
             (
                 self.relative_positions,
                 self.intentions,
-                self.other_agent_life,
                 self.hold_item_info,
             ),
             axis=-1,
@@ -201,8 +190,6 @@ class AgentObservation(NamedTuple):
                 self.obs_scans,
                 self.life,
                 self.is_hold_item,
-                jnp.expand_dims(self.item_time, -1),
-                self.item_starts,
                 self.item_goals,
             )
         )
@@ -213,7 +200,6 @@ class AgentObservation(NamedTuple):
             (
                 self.relative_positions,
                 self.intentions,
-                self.other_agent_life,
                 self.hold_item_info,
             ),
             axis=-1,

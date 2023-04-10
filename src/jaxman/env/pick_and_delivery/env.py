@@ -32,7 +32,7 @@ class JaxPandDEnv(gym.Env):
         self._env_info, self._agent_info, self._task_info = self.instance.export_info()
         self.num_agents = config.num_agents
         self.num_items = config.num_items
-        self.max_life = config.max_life
+        self.use_intentions = config.use_intentions
         self.use_hold_item_info = config.use_hold_item_info
         self.is_discrete = config.is_discrete
         self.is_diff_drive = config.is_diff_drive
@@ -52,14 +52,16 @@ class JaxPandDEnv(gym.Env):
                 dtype=np.float32,
             )
         if not self.is_discrete:
-            comm_dim = 11  # (rel_pos, rot, vel, ang) * 2 + life
+            comm_dim = 5  # (rel_pos, rot, vel, ang) * 2
         elif self.is_diff_drive:
-            comm_dim = 7  # (rel_pos, rot) * 2 + life
+            comm_dim = 3  # (rel_pos, rot) * 2
         else:
-            comm_dim = 5  # (rel_pos,) * 2 + life
+            comm_dim = 2  # (rel_pos,) * 2
+        if self.use_intentions:
+            comm_dim *= 2
         if self.use_hold_item_info:
-            comm_dim += 4  # (is_hold_item, item_goal, item_time)
-        item_dim = 5  # (item_pos, item_goal, item_time)
+            comm_dim += 3  # (is_hold_item, item_goal)
+        item_dim = 4  # (item_pos, item_goal)
 
         obs_dim = (
             self.obs.cat()[0].shape[0]
@@ -120,9 +122,8 @@ class JaxPandDEnv(gym.Env):
         self.state = State(
             agent_state=agent_state,
             load_item_id=jnp.ones((self.num_agents,), dtype=int) * self.num_items,
-            life=jnp.ones((self.num_agents,), dtype=int) * self.max_life,
+            life=jnp.zeros((self.num_agents,), dtype=int),
             item_pos=self.task_info.item_starts,
-            item_time=jnp.zeros((self.num_items,), dtype=int),
         )
 
         # initialize trial information

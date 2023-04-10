@@ -25,15 +25,18 @@ def _build_compute_agent_intention(
     num_agents = env_info.num_agents
     is_discrete = env_info.is_discrete
     is_diff_drive = env_info.is_diff_drive
+    use_intentions = env_info.use_intentions
     _compute_next_state = _build_compute_next_state(is_discrete, is_diff_drive)
     _compute_relative_pos = _build_get_relative_positions(env_info)
 
     if not is_discrete:
-        comm_dim = 10  # (rel_pos, rot, vel, ang) * 2
+        comm_dim = 5  # (rel_pos, rot, vel, ang) * 2
     elif env_info.is_diff_drive:
-        comm_dim = 6  # (rel_pos, rot) * 2
+        comm_dim = 3  # (rel_pos, rot) * 2
     else:
-        comm_dim = 4  # (rel_pos,) * 2
+        comm_dim = 2  # (rel_pos,) * 2
+    if use_intentions:
+        comm_dim *= 2
 
     dummy_comm = jnp.zeros((num_agents, 1, comm_dim))
     dummy_mask = jnp.zeros((num_agents, 1))
@@ -52,18 +55,23 @@ def _build_compute_agent_intention(
         Returns:
             Array: intentions
         """
-        state = observations.state
-        observations = observations.split_observation()
-        dummy_observation = observations._replace(
-            communication=dummy_comm, agent_mask=dummy_mask
-        )
-        if is_discrete:
-            q_values = actor_fn({"params": actor_params}, dummy_observation)
-            actions = jnp.argmax(q_values, axis=-1)
+        if use_intentions:
+            state = observations.state
+            observations = observations.split_observation()
+            dummy_observation = observations._replace(
+                communication=dummy_comm, agent_mask=dummy_mask
+            )
+            if is_discrete:
+                q_values = actor_fn({"params": actor_params}, dummy_observation)
+                actions = jnp.argmax(q_values, axis=-1)
+            else:
+                actions, _ = actor_fn({"params": actor_params}, dummy_observation)
+            next_possible_state = jax.vmap(_compute_next_state)(
+                state, actions, agent_info
+            )
+            intentions = _compute_relative_pos(state, next_possible_state)
         else:
-            actions, _ = actor_fn({"params": actor_params}, dummy_observation)
-        next_possible_state = jax.vmap(_compute_next_state)(state, actions, agent_info)
-        intentions = _compute_relative_pos(state, next_possible_state)
+            intentions = jnp.zeros((num_agents, num_agents, 0))
         return intentions
 
     return jax.jit(_compute_agents_intentions)
