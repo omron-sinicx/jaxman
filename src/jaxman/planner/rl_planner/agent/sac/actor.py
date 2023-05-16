@@ -23,7 +23,6 @@ from tensorflow_probability.substrates import jax as tfp
 from ...core import AgentObservation
 from ..model.continuous_model import Actor as ContinuousActor
 from ..model.discrete_model import Actor as DiscreteActor
-from ..model.hybrid_model import PandDActor
 
 tfd = tfp.distributions
 
@@ -58,7 +57,6 @@ def create_actor(
     if isinstance(action_space, Box):
         action_dim = action_space.shape[0]
         actor_fn = ContinuousActor(config.hidden_dim, config.msg_dim, action_dim)
-        # actor_fn = PandDActor(config.hidden_dim, config.msg_dim, 2)
     else:
         action_dim = action_space.n
         actor_fn = DiscreteActor(config.hidden_dim, config.msg_dim, action_dim)
@@ -146,49 +144,6 @@ def update(
         assert_shape(log_probs, (batch_size,))
         actor_loss = actor_loss.mean()
         return actor_loss, -log_probs
-
-    def hybrid_loss_fn(actor_params: FrozenDict) -> Tuple[Array, Dict]:
-        batch_size = batch.observations.base_observation.shape[0]
-        means, log_stds, dis_action_probs = actor.apply_fn(
-            {"params": actor_params},
-            batch.observations,
-        )
-        # continuous
-        dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=jnp.exp(log_stds))
-        cont_actions = dist.sample(seed=key)
-        cont_log_prob = dist.log_prob(cont_actions)
-
-        # discrete
-        z = dis_action_probs == 0.0
-        dis_action_probs += z.astype(float) * 1e-8
-        log_probs = jnp.log(dis_action_probs)
-        entropy = -jnp.sum(dis_action_probs * log_probs, axis=-1)
-        dis_action_dist = tfd.Categorical(probs=dis_action_probs)
-        dis_actions = dis_action_dist.sample(seed=key).reshape(-1, 1)
-
-        actions = jnp.concatenate((cont_actions, dis_actions), axis=-1)
-        dis_q1, dis_q2, cont_q1, cont_q2 = critic.apply_fn(
-            {"params": critic.params},
-            batch.observations,
-            actions,
-        )
-
-        # continuous
-        cont_q = jnp.squeeze(jnp.minimum(cont_q1, cont_q2))
-        temp = jnp.exp(temperature.apply_fn({"params": temperature.params}))
-        actor_loss = cont_log_prob * temp - cont_q
-        assert_shape(actor_loss, (batch_size,))
-        assert_shape(cont_log_prob, (batch_size,))
-
-        # discrete
-        dis_q = jnp.minimum(dis_q1, dis_q2)
-        temp = jnp.exp(temperature.apply_fn({"params": temperature.params}))
-        actor_loss = actor_loss - (
-            jnp.sum(dis_action_probs * dis_q, axis=-1) + temp * entropy
-        )
-
-        actor_loss = actor_loss.mean()
-        return actor_loss, -cont_log_prob
 
     if is_discrete:
         grad_fn = jax.value_and_grad(discrete_loss_fn, has_aux=True)

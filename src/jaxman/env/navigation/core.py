@@ -118,21 +118,6 @@ class AgentObservation(NamedTuple):
     intentions: Optional[Array] = None
     masks: Optional[Array] = None
 
-    def normalize(self, map_size: int) -> AgentObservation:
-        """normalized agent position and goal position used for discrete environment
-
-        Args:
-            map_size (int): map size
-
-        Returns:
-            AgentObservation: normalized AgentObservations
-        """
-        normed_pos = self.state.pos / map_size
-        normed_state = self.state._replace(pos=normed_pos)
-        normed_goals = self.goals / map_size
-
-        return self._replace(state=normed_state, goals=normed_goals)
-
     def cat(self, as_numpy=False) -> Array:
         """
         concatenate agent observations into a single array

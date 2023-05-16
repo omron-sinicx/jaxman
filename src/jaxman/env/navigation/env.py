@@ -32,7 +32,6 @@ class JaxMANEnv(gym.Env):
         self._env_info, self._agent_info, self._task_info = self.instance.export_info()
         self.num_agents = config.num_agents
         self.is_discrete = config.is_discrete
-        self.is_diff_drive = config.is_diff_drive
         self.use_intentions = config.use_intentions
         self._inner_step = _build_inner_step(self._env_info, self._agent_info)
         self._observe = _build_observe(self._env_info, self._agent_info)
@@ -51,8 +50,6 @@ class JaxMANEnv(gym.Env):
             )
         if not self.is_discrete:
             comm_dim = 5  # (rel_pos, rot, vel, ang) * 2
-        elif self.is_diff_drive:
-            comm_dim = 3  # (rel_pos, rot) * 2
         else:
             comm_dim = 2  # (rel_pos,) * 2
         if self.use_intentions:
@@ -126,7 +123,6 @@ class JaxMANEnv(gym.Env):
             self.trial_info,
             dones,
             self.is_discrete,
-            self.is_diff_drive,
             high_quality,
         )
 
@@ -139,7 +135,6 @@ class JaxMANEnv(gym.Env):
             self.trial_info,
             dones,
             self.is_discrete,
-            self.is_diff_drive,
             high_quality,
         )
         fig, ax = plt.subplots()
@@ -171,9 +166,6 @@ class JaxMANEnv(gym.Env):
         self.trial_info = info
         obs = self._observe(state, self.task_info, jnp.logical_not(done))
         return obs, rew, done, info
-
-    # def build_step(self, is_discrete: bool, is_diff_drive: bool):
-    #     return _build_step(self._env_info, self._agent_info, is_discrete, is_diff_drive)
 
     def build_reset(self):
         pass

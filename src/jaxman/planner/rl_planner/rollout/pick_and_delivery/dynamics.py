@@ -28,11 +28,9 @@ def _build_compute_agent_intention(
     env_info: EnvInfo,
     agent_info: AgentInfo,
     actor_fn: Callable,
-    use_maxmin_dqn: bool,
 ) -> Callable:
     num_agents = env_info.num_agents
     is_discrete = env_info.is_discrete
-    is_diff_drive = env_info.is_diff_drive
     use_intentions = env_info.use_intentions
     use_hold_item_info = env_info.use_hold_item_info
 
@@ -41,8 +39,6 @@ def _build_compute_agent_intention(
 
     if not is_discrete:
         comm_dim = 5  # (rel_pos, rot, vel, ang) * 2
-    elif is_diff_drive:
-        comm_dim = 3  # (rel_pos, rot) * 2
     else:
         comm_dim = 2  # (rel_pos,) * 2
     if use_intentions:
@@ -79,8 +75,6 @@ def _build_compute_agent_intention(
 
             if is_discrete:
                 action_probs = actor_fn({"params": actor_params}, dummy_observation)
-                if use_maxmin_dqn:
-                    action_probs = jnp.min(action_probs, axis=1)
                 actions = jnp.argmax(action_probs, axis=-1)
             else:
                 means, _ = actor_fn({"params": actor_params}, dummy_observation)
@@ -101,13 +95,9 @@ def _build_compute_agent_intention(
     return jax.jit(_compute_agents_intentions)
 
 
-def _build_rollout_step(
-    env_info: EnvInfo, agent_info: AgentInfo, actor_fn: Callable, use_maxmin_dqn: bool
-):
+def _build_rollout_step(env_info: EnvInfo, agent_info: AgentInfo, actor_fn: Callable):
     _env_step = _build_inner_step(env_info, agent_info)
-    _compute_intentions = _build_compute_agent_intention(
-        env_info, agent_info, actor_fn, use_maxmin_dqn
-    )
+    _compute_intentions = _build_compute_agent_intention(env_info, agent_info, actor_fn)
     _observe = _build_observe(env_info, agent_info)
 
     def _step(

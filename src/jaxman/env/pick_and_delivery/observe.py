@@ -62,7 +62,6 @@ def _build_observe(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         else:
             obs_pos = _get_obs_pos(state, task_info.obs.edges)
 
-        life = state.life.reshape(-1, 1)
         is_hold_item = (state.load_item_id < num_items).reshape(-1, 1).astype(int)
         item_goals = _compute_item_goals(state.load_item_id, task_info.item_goals)
 
@@ -109,7 +108,6 @@ def _build_observe(env_info: EnvInfo, agent_info: AgentInfo) -> Callable:
         return AgentObservation(
             agent_state=state.agent_state,
             obs_scans=obs_pos,
-            life=life,
             is_hold_item=is_hold_item,
             relative_positions=relative_positions,
             intentions=intentions,

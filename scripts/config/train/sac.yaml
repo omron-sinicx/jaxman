@@ -4,7 +4,7 @@ gamma: 0.99
 tau: 0.005
 target_entropy_ratio: 0.25
 batch_size: 256
-auto_temp_tuning: True
+auto_temp_tuning: False
 save_interval: 100000
 warmup_iters: 10000
 initial_rollout: 50000

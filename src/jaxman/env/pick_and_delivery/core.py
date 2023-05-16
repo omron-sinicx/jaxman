@@ -72,7 +72,6 @@ class State(NamedTuple):
 
     agent_state: AgentState = None
     load_item_id: Array = None
-    life: Array = Array
     item_pos: Array = None
 
     def cat(self, as_numpy=False) -> Array:
@@ -82,7 +81,6 @@ class State(NamedTuple):
                 self.agent_state.rot,
                 self.agent_state.vel,
                 self.agent_state.ang,
-                jnp.expand_dims(self.life, -1),
                 jnp.expand_dims(self.load_item_id, -1),
             )
         )
@@ -95,10 +93,9 @@ class State(NamedTuple):
     @classmethod
     def from_array(self, agent_array: Array, item_array):
         agent_state = AgentState.from_array(agent_array[:, :-1])
-        life = agent_array[:, -2]
         load_item_id = agent_array[:, -1]
         item_pos = item_array
-        return State(agent_state, load_item_id, life, item_pos)
+        return State(agent_state, load_item_id, item_pos)
 
 
 class AgentObservation(NamedTuple):
@@ -107,7 +104,6 @@ class AgentObservation(NamedTuple):
     Args:
         agent_state (AgentState): Agents' states
         obs_scans (Array): [n_agents, num_scans] array.
-        life (Array): Agent's remaining life.
         is_hold_item (Array): whether an agent holding item or not
         relative_positions (Array): relative agent positions
         intentions (Array): next step agent greedy intention (where greedy agent want to move)
@@ -121,7 +117,6 @@ class AgentObservation(NamedTuple):
 
     agent_state: AgentState
     obs_scans: Array
-    life: Array
     is_hold_item: Array
     relative_positions: Array
     intentions: Array
@@ -147,7 +142,6 @@ class AgentObservation(NamedTuple):
             (
                 ret_state,
                 self.obs_scans,
-                self.life,
                 self.is_hold_item,
                 self.item_goals,
             )
@@ -188,7 +182,6 @@ class AgentObservation(NamedTuple):
             (
                 ret_state,
                 self.obs_scans,
-                self.life,
                 self.is_hold_item,
                 self.item_goals,
             )

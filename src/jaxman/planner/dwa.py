@@ -20,14 +20,13 @@ from jaxman.utils import standardize
 
 
 def create_planner(env_info: EnvInfo, agent_info: AgentInfo):
-    _compute_next_state = _build_compute_next_state(
-        env_info.is_discrete, env_info.is_diff_drive
-    )
+    _compute_next_state = _build_compute_next_state(env_info)
     return DWAPlanner(
         compute_next_state=_compute_next_state,
         get_obstacle_dist=_get_obstacle_dist,
         get_agent_dist=_get_agent_dist,
         agent_info=agent_info,
+        use_acc=env_info.use_acc,
     )
 
 
@@ -37,6 +36,7 @@ class DWAPlanner:
     get_obstacle_dist: Callable
     get_agent_dist: Callable
     agent_info: AgentInfo
+    use_acc: bool
     velocity_resolution: int = 8
     angular_velocity_resolution: int = 8
     decay_temperature: float = 1e-1
@@ -66,38 +66,43 @@ class DWAPlanner:
 
             goal_based_decay = jnp.exp(-goal_dist / self.decay_temperature)
 
-            acc_cands = jnp.linspace(
+            act0 = jnp.linspace(
                 -1,
                 (1 - goal_based_decay),
                 self.velocity_resolution,
             ).flatten()  # (acceleration_resolution, )
-            ang_acc_cands = jnp.linspace(
+            act1 = jnp.linspace(
                 -1,
                 1,
                 self.angular_velocity_resolution,
             ).flatten()  # (angular_acceleration_resolution, 1)
-
             # (v_res x av_res, 2)
-            dwin = jnp.vstack(
-                [x.flatten() for x in jnp.meshgrid(acc_cands, ang_acc_cands)]
-            ).T
+            dwin = jnp.vstack([x.flatten() for x in jnp.meshgrid(act0, act1)]).T
 
-            next_vel = jnp.clip(
-                state.vel + dwin[:, 0] * agent_info.max_accs,
-                a_min=agent_info.min_vels,
-                a_max=agent_info.max_vels,
-            )
-            next_ang_vel = jnp.clip(
-                state.vel + dwin[:, 1] * agent_info.max_ang_accs,
-                a_min=agent_info.min_ang_vels,
-                a_max=agent_info.max_ang_vels,
-            )
-            angle_diff = jnp.abs(
-                state.rot + next_ang_vel - goal_angle
-            )  # (v_res x av_res, )
-            angle_diff = jnp.minimum(angle_diff, jnp.pi * 2 - angle_diff)
-            heading_score = jnp.pi - angle_diff
-            vel_score = next_vel  # (v_res x av_res, )
+            if self.use_acc:
+                next_vel = jnp.clip(
+                    state.vel + dwin[:, 0] * agent_info.max_accs,
+                    a_min=0,
+                    a_max=agent_info.max_vels,
+                )
+                next_ang_vel = jnp.clip(
+                    state.vel + dwin[:, 1] * agent_info.max_ang_accs,
+                    a_min=-agent_info.max_ang_vels,
+                    a_max=agent_info.max_ang_vels,
+                )
+                angle_diff = jnp.abs(
+                    state.rot + next_ang_vel - goal_angle
+                )  # (v_res x av_res, )
+                angle_diff = jnp.minimum(angle_diff, jnp.pi * 2 - angle_diff)
+                heading_score = jnp.pi - angle_diff
+                vel_score = next_vel  # (v_res x av_res, )
+            else:
+                angle_diff = jnp.abs(
+                    state.rot + dwin[:, 1] * agent_info.max_ang_vels - goal_angle
+                )
+                angle_diff = jnp.minimum(angle_diff, jnp.pi * 2 - angle_diff)
+                heading_score = jnp.pi - angle_diff
+                vel_score = dwin[:, 0] * agent_info.max_vels  # (v_res x av_res, )
 
             next_states = jax.vmap(
                 partial(self.compute_next_state, state=state, agent_info=agent_info)

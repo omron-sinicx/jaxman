@@ -33,23 +33,6 @@ def plot_grid_robot(image, x, y, color):
     return image
 
 
-def plot_diff_drive_robot(image, x, y, rot, color):
-    image[x - 1 : x + 2, y - 1 : y + 2] = color
-    if rot == 0:
-        image[x + 1, y - 1] = [0, 0, 0]
-        image[x + 1, y + 1] = [0, 0, 0]
-    if rot == 1:
-        image[x - 1, y + 1] = [0, 0, 0]
-        image[x + 1, y + 1] = [0, 0, 0]
-    if rot == 2:
-        image[x - 1, y - 1] = [0, 0, 0]
-        image[x - 1, y + 1] = [0, 0, 0]
-    if rot == 3:
-        image[x - 1, y - 1] = [0, 0, 0]
-        image[x + 1, y - 1] = [0, 0, 0]
-    return image
-
-
 def plot_collide_robot(image, x, y, color):
     # render "x"
     image[x, y] = color
@@ -80,7 +63,6 @@ def render_agent_and_obstacles(
     occupancy: Array,
     is_collided: Array = None,
     done: Array = None,
-    is_diff_drive: bool = False,
     is_colorful: bool = False,
 ):
     """
@@ -91,7 +73,6 @@ def render_agent_and_obstacles(
         occupancy (Array): Occunacy map
         is_collided (TrialInfo, optional): trial information
         done (Array, optional): done for each agent
-        is_diff_drive (bool, optional): whether environment is diff drive env or not
         is_colorful (bool, optional): Are all agents the same color or are they colorful?
     """
     # resize
@@ -119,27 +100,13 @@ def render_agent_and_obstacles(
                 if done[i] and is_collided[i]:
                     bg = plot_collide_robot(bg, pos[i, 1], pos[i, 0], color)
                 else:
-                    if is_diff_drive:
-                        bg = plot_diff_drive_robot(
-                            bg, pos[i, 1], pos[i, 0], state.rot[i, 0], color
-                        )
-                    else:
-                        bg = plot_grid_robot(bg, pos[i, 1], pos[i, 0], color)
+                    bg = plot_grid_robot(bg, pos[i, 1], pos[i, 0], color)
             elif is_collided[i]:
                 bg = plot_collide_robot(bg, pos[i, 1], pos[i, 0], color)
-            elif is_diff_drive:
-                bg = plot_diff_drive_robot(
-                    bg, pos[i, 1], pos[i, 0], state.rot[i, 0], color
-                )
             else:
                 bg = plot_grid_robot(bg, pos[i, 1], pos[i, 0], color)
         else:
-            if is_diff_drive:
-                bg = plot_diff_drive_robot(
-                    bg, pos[i, 1], pos[i, 0], state.rot[i, 0], color
-                )
-            else:
-                bg = plot_grid_robot(bg, pos[i, 1], pos[i, 0], color)
+            bg = plot_grid_robot(bg, pos[i, 1], pos[i, 0], color)
 
     return bg
 
@@ -246,7 +213,6 @@ def render_env(
     occupancy: Array,
     trial_info: TrialInfo = None,
     done: Array = None,
-    is_diff_drive: bool = False,
     is_high_resolution: bool = False,
     task_type: str = "navigation",
 ) -> np.ndarray:
@@ -258,7 +224,6 @@ def render_env(
         occupancy (Array): obstacle occupancy map
         trial_info (TrialInfo, optional): trial information. Defaults to None.
         done (Array, optional): episode done for each agents. Defaults to None.
-        is_diff_drive (bool, optional): whether agent action space is diff-drive or not. Defaults to False.
         is_high_resolution (bool, optional): whether update image to high-resolution. Defaults to False.
         task_type (str, optional): task type (navigation or pick and delivery). Defaults to "navigation".
 
@@ -280,7 +245,6 @@ def render_env(
         occupancy,
         is_collided,
         done,
-        is_diff_drive,
         is_colorful=is_navigation,
     )
     if is_navigation:

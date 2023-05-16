@@ -35,7 +35,6 @@ class JaxPandDEnv(gym.Env):
         self.use_intentions = config.use_intentions
         self.use_hold_item_info = config.use_hold_item_info
         self.is_discrete = config.is_discrete
-        self.is_diff_drive = config.is_diff_drive
         self._step = _build_inner_step(self._env_info, self._agent_info)
         self._observe = _build_observe(self._env_info, self._agent_info)
         self.obs = self.reset()
@@ -53,8 +52,6 @@ class JaxPandDEnv(gym.Env):
             )
         if not self.is_discrete:
             comm_dim = 5  # (rel_pos, rot, vel, ang) * 2
-        elif self.is_diff_drive:
-            comm_dim = 3  # (rel_pos, rot) * 2
         else:
             comm_dim = 2  # (rel_pos,) * 2
         if self.use_intentions:
@@ -122,7 +119,6 @@ class JaxPandDEnv(gym.Env):
         self.state = State(
             agent_state=agent_state,
             load_item_id=jnp.ones((self.num_agents,), dtype=int) * self.num_items,
-            life=jnp.zeros((self.num_agents,), dtype=int),
             item_pos=self.task_info.item_starts,
         )
 
@@ -140,7 +136,6 @@ class JaxPandDEnv(gym.Env):
             self.trial_info,
             dones,
             self.is_discrete,
-            self.is_diff_drive,
             high_quality,
             "pick_and_delivery",
         )
@@ -154,7 +149,6 @@ class JaxPandDEnv(gym.Env):
             self.trial_info,
             dones,
             self.is_discrete,
-            self.is_diff_drive,
             high_quality,
         )
         fig, ax = plt.subplots()

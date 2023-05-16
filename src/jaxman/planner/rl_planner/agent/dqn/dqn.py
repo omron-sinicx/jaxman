@@ -20,7 +20,7 @@ from jaxman.planner.rl_planner.memory.dataset import TrainBatch
 from omegaconf import DictConfig
 
 from ...core import AgentObservation
-from ..model.discrete_model import Critic, MaxMinCritic, MultiHeadCritic
+from ..model.discrete_model import Critic
 from ..sac.critic import update_target_critic
 from .update import update
 
@@ -63,36 +63,8 @@ def create_dqn_agent(
 
     action_dim = action_space.n
 
-    if config.use_multi_head:
-        actor_fn = MultiHeadCritic(
-            config.hidden_dim, config.msg_dim, action_dim, config.use_dueling_net
-        )
-        target_actor_fn = MultiHeadCritic(
-            config.hidden_dim, config.msg_dim, action_dim, config.use_dueling_net
-        )
-    elif config.use_maxmin_dqn:
-        actor_fn = MaxMinCritic(
-            config.hidden_dim,
-            config.msg_dim,
-            action_dim,
-            config.use_dueling_net,
-            config.N,
-        )
-        target_actor_fn = MaxMinCritic(
-            config.hidden_dim,
-            config.msg_dim,
-            action_dim,
-            config.use_dueling_net,
-            config.N,
-        )
-
-    else:
-        actor_fn = Critic(
-            config.hidden_dim, config.msg_dim, action_dim, config.use_dueling_net
-        )
-        target_actor_fn = Critic(
-            config.hidden_dim, config.msg_dim, action_dim, config.use_dueling_net
-        )
+    actor_fn = Critic(config.hidden_dim, config.msg_dim, action_dim)
+    target_actor_fn = Critic(config.hidden_dim, config.msg_dim, action_dim)
     params = actor_fn.init(
         actor_key,
         dummy_observations,
@@ -114,9 +86,6 @@ def create_dqn_agent(
 @partial(
     jax.jit,
     static_argnames=(
-        "is_pal",
-        "use_maxmin_dqn",
-        "N",
         "use_ddqn",
         "use_k_step_learning",
     ),
@@ -127,10 +96,6 @@ def _update_dqn_jit(
     batch: TrainBatch,
     gamma: float,
     tau: float,
-    is_pal: bool,
-    alpha: float,
-    use_maxmin_dqn: bool,
-    N: int,
     use_ddqn: bool,
     use_k_step_learning: bool,
     k: int,
@@ -144,10 +109,6 @@ def _update_dqn_jit(
         batch (TrainBatch): Train Batch
         gamma (float): gamma. decay rate
         tau (float): tau. target critic update rate
-        is_pal (bool): whether to use persistent advantage laerning or not
-        alpha (float): weight of action gap used for persistent advantage learning
-        use_maxmin_dqn (bool): whether to use Maxmin Q-Learning
-        N (int): number of networks for Maxmin Q-Learning
         use_ddqn (bool): whether to use double dqn
         use_k_step_learning (bool): whether to use k step learning
         k (int): k for multi step learning
@@ -162,10 +123,6 @@ def _update_dqn_jit(
         dqn.target_network,
         batch,
         gamma,
-        is_pal,
-        alpha,
-        use_maxmin_dqn,
-        N,
         use_ddqn,
         use_k_step_learning,
         k,
@@ -179,7 +136,7 @@ def _update_dqn_jit(
     )
 
 
-def build_sample_action(actor_fn: Callable, evaluate: bool, use_maxmin_dnq: bool):
+def build_sample_action(actor_fn: Callable, evaluate: bool):
     def sample_action(
         params: FrozenDict,
         observations: AgentObservation,
@@ -198,8 +155,6 @@ def build_sample_action(actor_fn: Callable, evaluate: bool, use_maxmin_dnq: bool
         obs = observations.split_observation()
 
         q_values = actor_fn({"params": params}, obs)
-        if use_maxmin_dnq:
-            q_values = jnp.min(q_values, axis=1)
         actions = jnp.argmax(q_values, axis=-1)
         if evaluate:
             pass
@@ -216,8 +171,6 @@ def build_sample_action(actor_fn: Callable, evaluate: bool, use_maxmin_dnq: bool
 
 def restore_dqn_actor(
     dqn: DQN,
-    is_diff_drive: bool,
-    model_config: DictConfig,
     restore_dir: str,
 ) -> DQN:
     """restore pretrained model
@@ -231,31 +184,12 @@ def restore_dqn_actor(
     Returns:
         DQN: restored dqn agent
     """
-    if is_diff_drive:
-        actor_params = checkpoints.restore_checkpoint(
-            ckpt_dir=restore_dir,
-            target=dqn.actor,
-            prefix="diff_drive_actor",
-        ).params
-    else:
-        if model_config.use_multi_head:
-            actor_params = checkpoints.restore_checkpoint(
-                ckpt_dir=restore_dir,
-                target=dqn.actor,
-                prefix="grid_actor_multi_head",
-            ).params
-        elif model_config.use_maxmin_dqn:
-            actor_params = checkpoints.restore_checkpoint(
-                ckpt_dir=restore_dir,
-                target=dqn.actor,
-                prefix="grid_actor_maxmin",
-            ).params
-        else:
-            actor_params = checkpoints.restore_checkpoint(
-                ckpt_dir=restore_dir,
-                target=dqn.actor,
-                prefix="grid_actor_single",
-            ).params
+
+    actor_params = checkpoints.restore_checkpoint(
+        ckpt_dir=restore_dir,
+        target=dqn.actor,
+        prefix="grid_actor_single",
+    ).params
     actor = dqn.actor.replace(params=actor_params)
     target_network = dqn.target_network.replace(params=actor_params)
 

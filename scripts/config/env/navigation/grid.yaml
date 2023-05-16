@@ -1,7 +1,6 @@
 env_name: "navigation"
 name: 'grid'
 is_discrete: True
-is_diff_drive: False
 num_agents: 2
 num_items: 0
 map_size: 30
@@ -16,6 +15,7 @@ comm_r: 4
 num_scans: 64
 scan_range: 0.1
 use_intentions: True
+use_acc: False
 level: 5
 timeout: 100
 rad: 0.02

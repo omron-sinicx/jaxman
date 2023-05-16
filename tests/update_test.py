@@ -123,26 +123,6 @@ def test_dqn_update(setup):
         0.95,
         0.05,
         True,
-        0.9,
-        False,
-        model_config.N,
-        True,
-        True,
-        4,
-    )
-
-    # update Maxmin DQN
-    results = _update_dqn_jit(
-        key,
-        dqn,
-        data,
-        0.95,
-        0.05,
-        True,
-        0.9,
-        False,
-        model_config.N,
-        True,
         True,
         4,
     )

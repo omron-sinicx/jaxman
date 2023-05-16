@@ -15,29 +15,21 @@ from chex import Array, PRNGKey
 
 from .obstacle import ObstacleMap
 
-diff_drive_rots = jnp.array([0.0, jnp.pi / 2, jnp.pi, jnp.pi * 3 / 2])
 
-
-@partial(jax.jit, static_argnames=("num_samples", "is_discrete", "is_diff_drive"))
-def sample_start_rots(
-    key: PRNGKey, num_samples: int, is_discrete: bool, is_diff_drive: bool
-) -> Array:
+@partial(jax.jit, static_argnames=("num_samples", "is_discrete"))
+def sample_start_rots(key: PRNGKey, num_samples: int, is_discrete: bool) -> Array:
     """sample agent start rotations
 
     Args:
         key (PRNGKey): random key variable
         num_samples (int): number to sample
         is_discrete (bool): whether environment is discrete space or not
-        is_diff_drive (bool): whether environment is diff drive env or not
 
     Returns:
         Array: sample agent start rotations
     """
     if is_discrete:
-        if is_diff_drive:
-            start_rots = jax.random.choice(key, 4, shape=(num_samples, 1))
-        else:
-            start_rots = jnp.zeros((num_samples, 1))
+        start_rots = jnp.zeros((num_samples, 1), dtype=int)
     else:
         start_rots = jax.random.uniform(key, shape=(num_samples, 1)) * 2 * jnp.pi
     return start_rots

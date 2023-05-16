@@ -30,23 +30,15 @@ class EnvInfo(NamedTuple):
     scan_range: float
     use_intentions: bool
     use_hold_item_info: bool
+    use_acc: bool
     timeout: int
     is_crashable: bool
     is_biased_sample: bool
     is_respawn: bool
     goal_reward: float
-    dist_reward: float
-    dont_hold_item_penalty: float
     crash_penalty: float
     time_penalty: float
-    pickup_reward: float
-    life_penalty: float
-    is_decay_reward: bool
-    decay_start: int
-    decay_end: int
-    min_reward: float
     is_discrete: bool
-    is_diff_drive: bool
 
     def is_valid(self) -> None:
         if self.occupancy_map is not None:
@@ -59,9 +51,7 @@ class AgentInfo(NamedTuple):
     """Kinematic information given to each individual agent and fixed for each problem instance"""
 
     max_vels: Array
-    min_vels: Array
     max_ang_vels: Array
-    min_ang_vels: Array
     max_accs: Array
     max_ang_accs: Array
     rads: Array
@@ -78,18 +68,14 @@ class AgentInfo(NamedTuple):
             AgentInfo: info for the specified agent
         """
         max_vels = self.max_vels[index]
-        min_vels = self.min_vels[index]
         max_ang_vels = self.max_ang_vels[index]
-        min_ang_vels = self.min_ang_vels[index]
         max_accs = self.max_accs[index]
         max_ang_accs = self.max_ang_accs[index]
         rads = self.rads[index]
 
         return self._replace(
             max_vels=max_vels,
-            min_vels=min_vels,
             max_ang_vels=max_ang_vels,
-            min_ang_vels=min_ang_vels,
             max_accs=max_accs,
             max_ang_accs=max_ang_accs,
             rads=rads,

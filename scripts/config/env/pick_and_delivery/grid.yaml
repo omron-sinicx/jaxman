@@ -1,7 +1,6 @@
 env_name: "pick_and_delivery"
 name: 'grid'
 is_discrete: True
-is_diff_drive: False
 num_agents: 1
 num_items: 10
 map_size: 15
@@ -18,6 +17,7 @@ num_scans: 64
 scan_range: 0.1
 use_intentions: True
 use_hold_item_info: True 
+use_acc: False
 level: 0
 timeout: 100
 rad: 0.02

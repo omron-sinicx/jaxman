@@ -4,7 +4,7 @@ Author: Hikaru Asano
 Affiliation: OMRON SINIC X / University of Tokyo
 """
 
-from typing import Callable, Tuple
+from typing import Callable
 
 import jax
 import jax.numpy as jnp
@@ -15,7 +15,7 @@ from .obstacle import ObstacleMap
 from .utils import xy_to_ij
 
 
-def _build_compute_next_state(is_discrete: bool, is_diff_drive: bool):
+def _build_compute_next_state(env_info: EnvInfo):
     discrete_action_list = jnp.array(
         [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]], dtype=int
     )
@@ -31,22 +31,28 @@ def _build_compute_next_state(is_discrete: bool, is_diff_drive: bool):
 
         Args:
             state (AgentState): agent current state
-            actions (Array): agent action
+            actions (Array): agent action, value_range: -1<actions<1
             agent_info (AgentInfo): agent kinematics information
 
         Returns:
             AgentState: next agent state
         """
-        vel = jnp.clip(
-            state.vel + actions[0] * agent_info.max_accs,
-            a_min=agent_info.min_vels,
-            a_max=agent_info.max_vels,
-        )
-        ang = jnp.clip(
-            state.ang + actions[1] * agent_info.max_ang_accs,
-            a_min=agent_info.min_ang_vels,
-            a_max=agent_info.max_ang_vels,
-        )
+        if env_info.use_acc:
+            vel = jnp.clip(
+                state.vel + actions[0] * agent_info.max_accs,
+                a_min=0,
+                a_max=agent_info.max_vels,
+            )
+            ang = jnp.clip(
+                state.ang + actions[1] * agent_info.max_ang_accs,
+                a_min=-agent_info.max_ang_vels,
+                a_max=agent_info.max_ang_vels,
+            )
+        else:
+            # Convert -1<action<1 into 0<action<1
+            normed_action = (actions[0] + 1) / 2
+            vel = normed_action * agent_info.max_vels
+            ang = actions[1] * agent_info.max_ang_vels
         next_rot = (state.rot + ang) % (2 * jnp.pi)
         next_pos = state.pos + vel * jnp.hstack([jnp.sin(next_rot), jnp.cos(next_rot)])
         next_state = AgentState(pos=next_pos, rot=next_rot, vel=vel, ang=ang)
@@ -79,90 +85,8 @@ def _build_compute_next_state(is_discrete: bool, is_diff_drive: bool):
         next_state.is_valid()
         return next_state
 
-    def _compute_diff_drive_next_state(
-        state: AgentState,
-        action: Array,
-        _: AgentInfo,
-    ) -> AgentState:
-        """
-        compute diff drive agent next state
-
-        Args:
-            state (AgentState): agent current state
-            action (Array): agent action
-            _ : dummy variable to align number of variables
-
-        Returns:
-            AgentState: agent next state
-        """
-
-        def compute_actions(action: Array, rot: Array) -> Tuple[Array, Array]:
-            """compute pos and rot action in diff drive agent
-
-            Args:
-                action (Array): agent raw action
-                rot (Array): agent current rotation
-
-            Returns:
-                Array: [pos_action, rot_action]
-            """
-            # Stay
-            def action_0(rot):
-                return jnp.array([0, 0], dtype=int), jnp.array([0], dtype=int)
-
-            # Go
-            def action_1(rot):
-                pos_action = move_with_rot(rot, 1)
-                rot_action = jnp.array([0], dtype=int)
-                return pos_action, rot_action
-
-            # Back
-            def action_2(rot):
-                pos_action = move_with_rot(rot, -1)
-                rot_action = jnp.array([0], dtype=int)
-                return pos_action, rot_action
-
-            # Turn Left
-            def action_3(rot):
-                return jnp.array([0, 0], dtype=int), jnp.array([-1], dtype=int)
-
-            # Turn Right
-            def action_4(rot):
-                return jnp.array([0, 0], dtype=int), jnp.array([1], dtype=int)
-
-            def move_with_rot(rot, way):
-                def move_0():
-                    return jnp.array([0, 1], dtype=int)
-
-                def move_1():
-                    return jnp.array([1, 0], dtype=int)
-
-                def move_2():
-                    return jnp.array([0, -1], dtype=int)
-
-                def move_3():
-                    return jnp.array([-1, 0], dtype=int)
-
-                direction = jax.lax.switch(rot, [move_0, move_1, move_2, move_3])
-                return (direction * way).astype(int)
-
-            return jax.lax.switch(
-                action, [action_0, action_1, action_2, action_3, action_4], rot
-            )
-
-        pos_action, rot_action = compute_actions(action, state.rot[0])
-        next_pos = state.pos + pos_action
-        next_rot = (state.rot + rot_action) % 4
-        vel = jnp.array([0], dtype=int)
-        ang = jnp.array([0], dtype=int)
-        next_state = AgentState(pos=next_pos, rot=next_rot, vel=vel, ang=ang)
-        next_state.is_valid()
-        return next_state
-
-    if not is_discrete:
+    if not env_info.is_discrete:
         return _compute_continuous_next_state
-    elif is_diff_drive:
-        return _compute_diff_drive_next_state
     else:
         return _compute_grid_next_state
 
@@ -397,7 +321,6 @@ def batched_apply_rotation(batched_pos: Array, batched_ang: Array) -> Array:
 
 def _build_get_relative_positions(env_info: EnvInfo):
     is_discrete = env_info.is_discrete
-    is_diff_drive = env_info.is_diff_drive
 
     def _compute_relative_pos(
         base_state: AgentState, target_state: AgentState
@@ -415,11 +338,8 @@ def _build_get_relative_positions(env_info: EnvInfo):
         relative_pos = jax.vmap(lambda target, base: target - base, in_axes=(None, 0))(
             target_state.pos, base_state.pos
         )
-        if is_diff_drive:
-            ang = base_state.rot.flatten() * jnp.pi / 2 - jnp.pi
-        else:
-            ang = base_state.rot.flatten() - jnp.pi
-        if (not is_discrete) or is_diff_drive:
+        ang = base_state.rot.flatten() - jnp.pi
+        if not is_discrete:
             return batched_apply_rotation(relative_pos, ang)
         else:
             return relative_pos
@@ -487,9 +407,6 @@ def _build_get_relative_positions(env_info: EnvInfo):
             relative_rot = _compute_relative_rot(base_state, target_state)
             relative_vel = _compute_relative_vel(base_state, target_state)
             return jnp.concatenate([relative_pos, relative_rot, relative_vel], axis=-1)
-        elif is_diff_drive:
-            relative_rot = _compute_relative_rot(base_state, target_state)
-            return jnp.concatenate((relative_pos, relative_rot), axis=-1)
         else:
             return relative_pos
 

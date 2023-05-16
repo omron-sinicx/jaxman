@@ -5,3 +5,4 @@ data
 **/__pycache__/*.pyc
 *.egg-info/
 result*
+.python-version

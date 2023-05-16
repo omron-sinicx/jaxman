@@ -30,11 +30,3 @@ def test_model(setup):
 
     dqn, key = create_dqn_agent(obs_space, act_space, model_config, key)
     q_values = dqn.actor.apply_fn({"params": dqn.actor.params}, obs)
-
-
-def test_multi_head_model(setup):
-    obs, obs_space, act_space, model_config, key = setup
-    model_config.use_multi_head = True
-
-    dqn, key = create_dqn_agent(obs_space, act_space, model_config, key)
-    q_values = dqn.actor.apply_fn({"params": dqn.actor.params}, obs)

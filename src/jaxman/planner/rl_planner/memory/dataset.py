@@ -70,21 +70,6 @@ class Buffer:
         self.next_observations = np.zeros(
             (self.capacity, total_obs_dim), dtype=observation_space["obs"].dtype
         )
-        self.priority = np.zeros((self.capacity,), dtype=np.float32)
-
-        # batch normalization
-        self.reward_mean = None
-        self.reward_var = None
-
-
-class PERTrainBatch(NamedTuple):
-    index: Array
-    observations: AgentObservation
-    actions: Array
-    rewards: Array
-    masks: Array
-    next_observations: AgentObservation
-    weight: Array
 
 
 class TrainBatch(NamedTuple):
@@ -93,7 +78,6 @@ class TrainBatch(NamedTuple):
     rewards: Array
     masks: Array
     next_observations: AgentObservation
-    next_actions: Array = None
 
 
 class Experience(NamedTuple):

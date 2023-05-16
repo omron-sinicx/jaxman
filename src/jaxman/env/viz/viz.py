@@ -23,7 +23,6 @@ def render_map(
     trial_info: TrialInfo = None,
     done: Array = None,
     is_discrete: bool = False,
-    is_diff_drive: bool = False,
     high_resolution: bool = False,
     task_type: str = "navigation",
 ):
@@ -34,7 +33,6 @@ def render_map(
             occupancy,
             trial_info,
             done,
-            is_diff_drive,
             high_resolution,
             task_type,
         )
@@ -57,7 +55,6 @@ def render_gif(
     trial_info: TrialInfo = None,
     dones: Array = None,
     is_discrete: bool = False,
-    is_diff_drive: bool = False,
     high_quality: bool = False,
     task_type: str = "navigation",
 ):
@@ -82,7 +79,6 @@ def render_gif(
                 task_info.obs.occupancy,
                 trial_info,
                 done,
-                is_diff_drive,
                 high_quality,
                 task_type,
             )

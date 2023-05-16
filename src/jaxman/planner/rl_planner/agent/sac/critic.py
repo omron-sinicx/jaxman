@@ -23,7 +23,6 @@ from tensorflow_probability.substrates import jax as tfp
 from ...core import AgentObservation
 from ..model.continuous_model import DoubleCritic as ContinuousCritic
 from ..model.discrete_model import DoubleCritic as DiscreteCritic
-from ..model.hybrid_model import PandDDoubleCritic
 
 tfd = tfp.distributions
 
@@ -59,7 +58,6 @@ def create_critic(
     if isinstance(action_space, Box):
         action_dim = action_space.shape[0]
         critic_fn = ContinuousCritic(config.hidden_dim, config.msg_dim)
-        # critic_fn = PandDDoubleCritic(config.hidden_dim, config.msg_dim)
         params = critic_fn.init(
             key,
             dummy_observations,
@@ -67,9 +65,7 @@ def create_critic(
         )["params"]
     else:
         action_dim = action_space.n
-        critic_fn = DiscreteCritic(
-            config.hidden_dim, config.msg_dim, action_dim, config.use_dueling_net
-        )
+        critic_fn = DiscreteCritic(config.hidden_dim, config.msg_dim, action_dim)
         params = critic_fn.init(
             key,
             dummy_observations,
@@ -202,68 +198,6 @@ def update(
         critic_loss = (jnp.squeeze(q1) - target_q) ** 2 + (
             jnp.squeeze(q2) - target_q
         ) ** 2
-
-        assert_shape(critic_loss, (batch_size,))
-        return critic_loss.mean()
-
-    def hybrid_loss_fn(params: FrozenDict) -> Array:
-        batch_size = batch.observations.base_observation.shape[0]
-
-        means, log_stds, next_dis_action_probs = actor.apply_fn(
-            {"params": actor.params},
-            batch.next_observations,
-        )
-        # continuous
-        dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=jnp.exp(log_stds))
-        cont_next_actions = dist.sample(seed=key)
-        cont_next_log_probs = dist.log_prob(cont_next_actions)
-
-        # discrete
-        z = next_dis_action_probs == 0.0
-        next_dis_action_probs += z.astype(float) * 1e-8
-        next_log_probs = jnp.log(next_dis_action_probs)
-        dis_action_dist = tfd.Categorical(probs=next_dis_action_probs)
-        dis_next_actions = dis_action_dist.sample(seed=key).reshape(-1, 1)
-
-        next_actions = jnp.concatenate((cont_next_actions, dis_next_actions), axis=-1)
-
-        # continuous
-        next_dis_q1, next_dis_q2, next_cont_q1, next_cont_q2 = target_critic.apply_fn(
-            {"params": target_critic.params},
-            batch.next_observations,
-            next_actions,
-        )
-
-        temp = jnp.exp(temperature.apply_fn({"params": temperature.params}))
-
-        # continuous
-        next_cont_q = jnp.squeeze(jnp.minimum(next_cont_q1, next_cont_q2))
-        target_cont_q = batch.rewards + gamma * batch.masks * (
-            next_cont_q - cont_next_log_probs * temp
-        )
-        # discrete
-        next_dis_q = jnp.minimum(next_dis_q1, next_dis_q2)
-        next_v = jnp.sum(
-            (next_dis_action_probs * (next_dis_q - temp * next_log_probs)), axis=-1
-        )
-        target_dis_q = batch.rewards + gamma * batch.masks * next_v
-
-        dis_q1, dis_q2, cont_q1, cont_q2 = critic.apply_fn(
-            {"params": params},
-            batch.observations,
-            batch.actions,
-        )
-        # discrete
-        discrete_actions = batch.actions[:, -1].astype(int)
-        dis_q1 = jax.vmap(lambda q_values, i: q_values[i])(dis_q1, discrete_actions)
-        dis_q2 = jax.vmap(lambda q_values, i: q_values[i])(dis_q2, discrete_actions)
-
-        critic_loss = (
-            (jnp.squeeze(dis_q1) - target_dis_q) ** 2
-            + (jnp.squeeze(dis_q2) - target_dis_q) ** 2
-            + (jnp.squeeze(cont_q1) - target_cont_q) ** 2
-            + (jnp.squeeze(cont_q2) - target_cont_q) ** 2
-        )
 
         assert_shape(critic_loss, (batch_size,))
         return critic_loss.mean()

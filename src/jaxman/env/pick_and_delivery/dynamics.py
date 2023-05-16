@@ -158,8 +158,7 @@ def _build_compute_next_env_state(env_info: EnvInfo, agent_info: AgentInfo) -> C
         next_load_item_id, next_item_pos = _compute_next_item_state(
             next_agent_state, actions, state.load_item_id, state.item_pos, task_info
         )
-        life = state.life + 1
-        return State(next_agent_state, next_load_item_id, life, next_item_pos)
+        return State(next_agent_state, next_load_item_id, next_item_pos)
 
     return jax.jit(_compute_next_env_state)
 
@@ -179,9 +178,7 @@ def _build_compute_next_agent_state(
     """
     is_discrete = env_info.is_discrete
     num_agents = env_info.num_agents
-    _compute_kinematic_next_state = _build_compute_next_state(
-        env_info.is_discrete, env_info.is_diff_drive
-    )
+    _compute_kinematic_next_state = _build_compute_next_state(env_info)
     _check_collide_with_agent_item = _build_check_collide_with_agent_item(
         env_info, agent_info
     )

@@ -23,8 +23,11 @@ class Instance:
 
     env_name: str
     num_agents: int
+    map_size: int
     max_vels: Array
     max_ang_vels: Array
+    max_accs: Array
+    max_ang_accs: Array
     rads: Array
     goal_rads: Array
     obs: ObstacleMap
@@ -32,6 +35,8 @@ class Instance:
     comm_r: float
     num_scans: int
     scan_range: float
+    use_intentions: bool
+    use_acc: bool
     timeout: int
     goal_reward: float
     crash_penalty: float
@@ -40,19 +45,14 @@ class Instance:
     start_rots: Array
     goals: Array
     is_discrete: bool
-    is_diff_drive: bool
 
     def __init__(self, config: DictConfig) -> None:
         self.env_name = config.env_name
         self.num_agents = config.num_agents
         self.map_size = config.map_size
         self.max_vels = jnp.array([[config.max_vel] for _ in range(self.num_agents)])
-        self.min_vels = jnp.array([[config.min_vel] for _ in range(self.num_agents)])
         self.max_ang_vels = jnp.array(
             [[config.max_ang_vel * jnp.pi] for _ in range(self.num_agents)]
-        )
-        self.min_ang_vels = jnp.array(
-            [[config.min_ang_vel * jnp.pi] for _ in range(self.num_agents)]
         )
         self.max_accs = jnp.array([[config.max_acc] for _ in range(self.num_agents)])
         self.max_ang_accs = jnp.array(
@@ -65,13 +65,13 @@ class Instance:
         self.num_scans = config.num_scans
         self.scan_range = config.scan_range
         self.use_intentions = config.use_intentions
+        self.use_acc = config.use_acc
         self.timeout = config.timeout
         self.goal_reward = config.goal_reward
         self.crash_penalty = config.crash_penalty
         self.time_penalty = config.time_penalty
 
         self.is_discrete = config.is_discrete
-        self.is_diff_drive = config.is_diff_drive
 
         self.obs = generate_obs_map(
             config.obs_type,
@@ -90,7 +90,6 @@ class Instance:
             self.obs,
             self.num_agents,
             config.is_discrete,
-            config.is_diff_drive,
         )
         self.starts = starts
         self.start_rots = start_rots
@@ -120,29 +119,19 @@ class Instance:
             scan_range=float(self.scan_range),
             use_intentions=bool(self.use_intentions),
             use_hold_item_info=False,
+            use_acc=bool(self.use_acc),
             timeout=int(self.timeout),
             is_crashable=True,
             is_biased_sample=False,
             is_respawn=False,
             goal_reward=self.goal_reward,
-            dist_reward=0,
-            dont_hold_item_penalty=0,
             crash_penalty=self.crash_penalty,
             time_penalty=self.time_penalty,
-            pickup_reward=0,
-            life_penalty=0,
-            is_decay_reward=False,
-            decay_start=10,
-            decay_end=20,
-            min_reward=0.1,
             is_discrete=self.is_discrete,
-            is_diff_drive=self.is_diff_drive,
         )
         agent_info = AgentInfo(
             max_vels=self.max_vels,
-            min_vels=self.min_vels,
             max_ang_vels=self.max_ang_vels,
-            min_ang_vels=self.min_ang_vels,
             max_accs=self.max_accs,
             max_ang_accs=self.max_ang_accs,
             rads=self.rads,
@@ -171,7 +160,6 @@ class Instance:
             self.rads,
             self.obs,
             self.num_agents,
-            self.is_discrete,
             self.is_discrete,
         )
         self.starts = starts

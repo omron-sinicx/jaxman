@@ -24,15 +24,12 @@ def _build_compute_agent_intention(
 ) -> Callable:
     num_agents = env_info.num_agents
     is_discrete = env_info.is_discrete
-    is_diff_drive = env_info.is_diff_drive
     use_intentions = env_info.use_intentions
-    _compute_next_state = _build_compute_next_state(is_discrete, is_diff_drive)
+    _compute_next_state = _build_compute_next_state(env_info)
     _compute_relative_pos = _build_get_relative_positions(env_info)
 
     if not is_discrete:
         comm_dim = 5  # (rel_pos, rot, vel, ang) * 2
-    elif env_info.is_diff_drive:
-        comm_dim = 3  # (rel_pos, rot) * 2
     else:
         comm_dim = 2  # (rel_pos,) * 2
     if use_intentions:

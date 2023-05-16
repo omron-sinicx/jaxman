@@ -18,7 +18,7 @@ from ..agent.core import Agent, _update_jit
 from .global_buffer import GlobalBuffer
 
 
-@ray.remote(num_cpus=1, num_gpus=1)
+@ray.remote(num_cpus=1, num_gpus=0)
 class Learner:
     def __init__(
         self,
@@ -55,14 +55,9 @@ class Learner:
         self.save_interval = int(config.train.save_interval)
         self.warmup_iters = config.train.warmup_iters
         self.use_pretrained_model = config.train.use_pretrained_model
-        self.is_pal = config.train.is_pal
-        self.alpha = config.train.alpha
-        self.use_maxmin_dqn = config.model.use_maxmin_dqn
-        self.N = config.model.N
         self.use_ddqn = config.train.use_ddqn
         self.use_k_step_learning = config.train.use_k_step_learning
         self.k = config.train.k
-        self.use_per = config.train.use_per
 
         self.action_scale = action_scale
         self.action_bias = action_bias
@@ -110,10 +105,6 @@ class Learner:
                 self.target_entropy,
                 self.auto_temp_tuning,
                 True,  # carry.step % carry.target_update_period == 0,
-                self.is_pal,
-                self.alpha,
-                self.use_maxmin_dqn,
-                self.N,
                 self.use_ddqn,
                 self.use_k_step_learning,
                 self.k,
@@ -128,8 +119,6 @@ class Learner:
                 self.store_params()
             if i % self.save_interval == 0:
                 self.save_model()
-            if self.use_per:
-                self.buffer.update_priority.remote(data.index, priority)
 
             self.counter += 1
         self.done = True
@@ -180,24 +169,3 @@ class Learner:
             step=self.counter,
             overwrite=True,
         )
-        # checkpoints.save_checkpoint(
-        #     ckpt_dir=self.save_dir,
-        #     target=self.critic,
-        #     prefix="critic_checkpoint_",
-        #     step=self.counter,
-        #     overwrite=True,
-        # )
-        # checkpoints.save_checkpoint(
-        #     ckpt_dir=self.save_dir,
-        #     target=self.target_critic,
-        #     prefix="target_critic_checkpoint_",
-        #     step=self.counter,
-        #     overwrite=True,
-        # )
-        # checkpoints.save_checkpoint(
-        #     ckpt_dir=self.save_dir,
-        #     target=self.temp,
-        #     prefix="temp_checkpoint_",
-        #     step=self.counter,
-        #     overwrite=True,
-        # )

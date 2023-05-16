@@ -16,13 +16,8 @@ from .utils import get_scans
 
 
 def _build_extract_fov(env_info: EnvInfo):
-    is_diff_drive = env_info.is_diff_drive
     fov_r = env_info.fov_r
     own_position_map = jnp.zeros((fov_r * 2 + 1, fov_r * 2 + 1)).at[fov_r, fov_r].set(1)
-
-    def rot90_traceable(m, k):
-        k = (k + 2) % 4
-        return jax.lax.switch(k, [partial(jnp.rot90, m, k=i) for i in range(4)])
 
     def _extract_fov(state: AgentState, obs_agent_map: Array) -> Array:
         """
@@ -41,8 +36,6 @@ def _build_extract_fov(env_info: EnvInfo):
             obs_agent_map, (x - fov_r, y - fov_r), (fov_r * 2 + 1, fov_r * 2 + 1)
         )
         fov = fov - own_position_map
-        if is_diff_drive:
-            fov = rot90_traceable(fov, state.rot[0])
 
         return fov
 
@@ -118,7 +111,6 @@ def _build_compute_relative_rot(env_info: EnvInfo):
 
 def _build_compute_relative_positions(env_info: EnvInfo):
     is_discrete = env_info.is_discrete
-    is_diff_drive = env_info.is_diff_drive
 
     def _compute_relative_pos(base_state: AgentState, target_pos: Array) -> Array:
         """compute relative position of all agents
@@ -134,11 +126,8 @@ def _build_compute_relative_positions(env_info: EnvInfo):
         relative_pos = jax.vmap(lambda target, base: target - base, in_axes=(None, 0))(
             target_pos, base_state.pos
         )
-        if is_diff_drive:
-            ang = base_state.rot.flatten() * jnp.pi / 2 - jnp.pi
-        else:
-            ang = base_state.rot.flatten() - jnp.pi
-        if (not is_discrete) or is_diff_drive:
+        ang = base_state.rot.flatten() - jnp.pi
+        if not is_discrete:
             return batched_apply_rotation(relative_pos, ang)
         else:
             return relative_pos
@@ -192,9 +181,6 @@ def _build_get_other_agent_infos(env_info: EnvInfo):
             relative_rot = _compute_relative_rot(base_state, target_state)
             relative_vel = _compute_relative_vel(base_state, target_state)
             return jnp.concatenate([relative_pos, relative_rot, relative_vel], axis=-1)
-        elif env_info.is_diff_drive:
-            relative_rot = _compute_relative_rot(base_state, target_state)
-            return jnp.concatenate((relative_pos, relative_rot), axis=-1)
         else:
             return relative_pos
 

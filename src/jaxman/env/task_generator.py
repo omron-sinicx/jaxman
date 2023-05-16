@@ -16,7 +16,7 @@ from .sampler import sample_random_agent_item_pos, sample_random_pos, sample_sta
 
 @partial(
     jax.jit,
-    static_argnames=("num_agents", "sample_type", "is_discrete", "is_diff_drive"),
+    static_argnames=("num_agents", "sample_type", "is_discrete"),
 )
 def sample_valid_start_goal(
     key: PRNGKey,
@@ -24,7 +24,6 @@ def sample_valid_start_goal(
     obs: ObstacleMap,
     num_agents: int,
     is_discrete: bool,
-    is_diff_drive: bool,
     no_overlap: bool = True,
     sample_type: str = "uniform",
     num_max_trials: int = 200,
@@ -38,7 +37,6 @@ def sample_valid_start_goal(
         obs (ObstacleMap): obstacle map
         num_agents (int): number of agents
         is_discrete (bool): whether environment action space is discrete or not
-        is_diff_drive (bool): whether environment is diff drive env or not
         no_overlap (bool, optional): whether or not to allow each vertices to be overlapped within agent radius. Defaults to False.
         sample_type (str, optional): sampling distribution type
         num_max_trials (int, optional): maximum number of resampling. Defaults to 100.
@@ -58,7 +56,7 @@ def sample_valid_start_goal(
         sample_type,
         num_max_trials,
     )
-    start_rots = sample_start_rots(key_pose, num_agents, is_discrete, is_diff_drive)
+    start_rots = sample_start_rots(key_pose, num_agents, is_discrete)
 
     return starts, start_rots, goals
 
@@ -70,7 +68,6 @@ def sample_valid_start_goal(
         "num_items",
         "sample_type",
         "is_discrete",
-        "is_diff_drive",
         "is_biased_sample",
     ),
 )
@@ -81,7 +78,6 @@ def sample_valid_agent_item_pos(
     num_agents: int,
     num_items: int,
     is_discrete: bool,
-    is_diff_drive: bool,
     no_overlap: bool = True,
     sample_type: str = "uniform",
     is_biased_sample: bool = False,
@@ -96,7 +92,6 @@ def sample_valid_agent_item_pos(
         obs (ObstacleMap): obstacle map
         num_agents (int): number of agents
         is_discrete (bool): whether environment action space is discrete or not
-        is_diff_drive (bool): whether environment is diff drive env or not
         no_overlap (bool, optional): whether or not to allow each vertices to be overlapped within agent radius. Defaults to False.
         sample_type (str, optional): sampling distribution type
         num_max_trials (int, optional): maximum number of resampling. Defaults to 100.
@@ -118,9 +113,7 @@ def sample_valid_agent_item_pos(
         is_biased_sample,
         num_max_trials,
     )
-    agent_start_rots = sample_start_rots(
-        key_pose, num_agents, is_discrete, is_diff_drive
-    )
+    agent_start_rots = sample_start_rots(key_pose, num_agents, is_discrete)
 
     return agent_starts, agent_start_rots, item_starts, item_goals
 

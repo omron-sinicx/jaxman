@@ -3,22 +3,24 @@ requires = ["pip>=21.3", "setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 
 [project]
 name = "jaxman"
 description = "Jax-based implementation for multi-agent navigation"
 readme = "README.md"
-license = {file = "LICENSE"}
-version="0.0.1"
-keywords = ["navigation", "multi-agent navigation", "multi-agent reinforcement learning"]
+license = { file = "LICENSE" }
+version = "0.0.1"
+keywords = [
+    "navigation",
+    "multi-agent navigation",
+    "multi-agent reinforcement learning",
+]
 maintainers = [
-  {name = "Hikaru Asano", email = "asano-hikaru19@g.ecc.u-tokyo.ac.jp"}
+    { name = "Hikaru Asano", email = "asano-hikaru19@g.ecc.u-tokyo.ac.jp" },
 ]
-classifiers = [
-    "Programming Language :: Python :: 3.9.*",
-]
+classifiers = ["Programming Language :: Python :: 3.9.*"]
 requires-python = ">=3.9"
 dependencies = [
     # "jaxmapp @ git+https://github.com/omron-sinicx/jaxmapp.git@be73e892d140ac04d15ba2781d936704ab6e4a6a",
@@ -50,7 +52,6 @@ dev = [
     "ray",
     "moviepy",
     "bootstrapped",
-    "cpprb",
 ]
 
 [tool.pysen]

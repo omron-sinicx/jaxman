@@ -24,8 +24,11 @@ class Instance:
     env_name: str
     num_agents: int
     num_items: int
+    map_size: int
     max_vels: Array
     max_ang_vels: Array
+    max_accs: Array
+    max_ang_accs: Array
     rads: Array
     item_rads: Array
     goal_rads: Array
@@ -34,29 +37,22 @@ class Instance:
     comm_r: float
     num_scans: int
     scan_range: float
+    use_intentions: bool
     use_hold_item_info: bool
+    use_acc: bool
     timeout: int
     is_crashable: bool
     is_biased_sample: bool
     is_respawn: bool
     goal_reward: float
-    dist_reward: float
-    dont_hold_item_penalty: float
     crash_penalty: float
     time_penalty: float
-    pickup_reward: float
-    life_penalty: float
-    is_decay_reward: bool
-    decay_start: int
-    decay_end: int
-    min_reward: float
     agent_starts: Array
     agent_start_rots: Array
     item_starts: Array
     item_goals: Array
     goals: Array
     is_discrete: bool
-    is_diff_drive: bool
 
     def __init__(self, config: DictConfig) -> None:
         self.env_name = config.env_name
@@ -64,12 +60,8 @@ class Instance:
         self.num_items = config.num_items
         self.map_size = config.map_size
         self.max_vels = jnp.array([[config.max_vel] for _ in range(self.num_agents)])
-        self.min_vels = jnp.array([[config.min_vel] for _ in range(self.num_agents)])
         self.max_ang_vels = jnp.array(
             [[config.max_ang_vel * jnp.pi] for _ in range(self.num_agents)]
-        )
-        self.min_ang_vels = jnp.array(
-            [[config.min_ang_vel * jnp.pi] for _ in range(self.num_agents)]
         )
         self.max_accs = jnp.array([[config.max_acc] for _ in range(self.num_agents)])
         self.max_ang_accs = jnp.array(
@@ -84,24 +76,16 @@ class Instance:
         self.scan_range = config.scan_range
         self.use_intentions = config.use_intentions
         self.use_hold_item_info = config.use_hold_item_info
+        self.use_acc = config.use_acc
         self.timeout = config.timeout
         self.is_crashable = config.is_crashable
         self.is_biased_sample = config.is_biased_sample
         self.is_respawn = config.is_respawn
         self.goal_reward = config.goal_reward
-        self.dist_reward = config.dist_reward
-        self.dont_hold_item_penalty = config.dont_hold_item_penalty
         self.crash_penalty = config.crash_penalty
         self.time_penalty = config.time_penalty
-        self.pickup_reward = config.pickup_reward
-        self.life_penalty = config.life_penalty
-        self.is_decay_reward = config.is_decay_reward
-        self.decay_start = config.decay_start
-        self.decay_end = config.decay_end
-        self.min_reward = config.min_reward
 
         self.is_discrete = config.is_discrete
-        self.is_diff_drive = config.is_diff_drive
 
         self.obs = generate_obs_map(
             config.obs_type,
@@ -126,7 +110,6 @@ class Instance:
             self.num_agents,
             self.num_items,
             config.is_discrete,
-            config.is_diff_drive,
             is_biased_sample=self.is_biased_sample,
         )
         self.agent_starts = agent_starts
@@ -158,29 +141,19 @@ class Instance:
             scan_range=float(self.scan_range),
             use_intentions=bool(self.use_intentions),
             use_hold_item_info=bool(self.use_hold_item_info),
+            use_acc=bool(self.use_acc),
             timeout=int(self.timeout),
             is_crashable=bool(self.is_crashable),
             is_biased_sample=bool(self.is_biased_sample),
             is_respawn=bool(self.is_respawn),
             goal_reward=self.goal_reward,
-            dist_reward=self.dist_reward,
-            dont_hold_item_penalty=self.dont_hold_item_penalty,
             crash_penalty=self.crash_penalty,
             time_penalty=self.time_penalty,
-            pickup_reward=self.pickup_reward,
-            life_penalty=self.life_penalty,
-            is_decay_reward=self.is_decay_reward,
-            decay_start=self.decay_start,
-            decay_end=self.decay_end,
-            min_reward=self.min_reward,
             is_discrete=self.is_discrete,
-            is_diff_drive=self.is_diff_drive,
         )
         agent_info = AgentInfo(
             max_vels=self.max_vels,
-            min_vels=self.min_vels,
             max_ang_vels=self.max_ang_vels,
-            min_ang_vels=self.min_ang_vels,
             max_accs=self.max_accs,
             max_ang_accs=self.max_ang_accs,
             rads=self.rads,
@@ -216,7 +189,6 @@ class Instance:
             self.num_agents,
             self.num_items,
             self.is_discrete,
-            self.is_diff_drive,
             is_biased_sample=self.is_biased_sample,
         )
         self.agent_starts = agent_starts
@@ -275,7 +247,6 @@ class Instance:
             self.num_agents,
             self.num_items,
             self.is_discrete,
-            self.is_diff_drive,
         )
         self.agent_starts = agent_starts
         self.agent_start_rots = agent_start_rots

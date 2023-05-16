@@ -62,7 +62,7 @@ def build_sample_agent_action(
     if model_config.name == "sac":
         return build_sample_sac_action(actor_fn, is_discrete, env_name, evaluate)
     else:
-        return build_sample_dqn_action(actor_fn, evaluate, model_config.use_maxmin_dqn)
+        return build_sample_dqn_action(actor_fn, evaluate)
 
 
 @partial(
@@ -71,9 +71,6 @@ def build_sample_agent_action(
         "is_discrete",
         "auto_temp_tuning",
         "update_target",
-        "is_pal",
-        "use_maxmin_dqn",
-        "N",
         "use_ddqn",
         "use_k_step_learning",
         "train_actor",
@@ -90,10 +87,6 @@ def _update_jit(
     target_entropy: float,
     auto_temp_tuning: bool,
     update_target: bool,
-    is_pal: bool,
-    alpha: bool,
-    use_maxmin_dqn: bool,
-    N: int,
     use_ddqn: bool,
     use_k_step_learning: bool,
     k: int,
@@ -113,10 +106,6 @@ def _update_jit(
         target_entropy (float): target entropy
         auto_temp_tuning (bool): whether to update temperature
         update_target (bool): whether to update target_critic network
-        is_pal (bool): whether to use persistent advantage laerning or not
-        alpha (float): weight of action gap used for persistent advantage learning
-        use_maxmin_dqn (bool): whether to use Maxmin Q-Learning
-        N (int): number of networks for Maxmin Q-Learning
         use_ddqn (bool): whether to use double dqn
         use_k_step_learning (bool): whether to use k step learning
         k (int): k for multi step learning
@@ -147,10 +136,6 @@ def _update_jit(
             batch,
             gamma,
             tau,
-            is_pal,
-            alpha,
-            use_maxmin_dqn,
-            N,
             use_ddqn,
             use_k_step_learning,
             k,

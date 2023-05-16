@@ -22,8 +22,7 @@ from .core import TaskInfo, TrialInfo
 # step function
 def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
     is_discrete = env_info.is_discrete
-    is_diff_drive = env_info.is_diff_drive
-    _compute_next_state = _build_compute_next_state(is_discrete, is_diff_drive)
+    _compute_next_state = _build_compute_next_state(env_info)
     _compute_rew_done_info = _build_compute_rew_done_info(env_info)
     _check_collision_wiht_agents = _build_check_collision_with_agents(
         env_info, agent_info, is_discrete
@@ -57,6 +56,10 @@ def _build_inner_step(env_info: EnvInfo, agent_info: AgentInfo):
         possible_next_state = jax.vmap(_compute_next_state)(
             state, masked_actions, agent_info
         )
+        array_state = possible_next_state.cat() * not_finished_agents.reshape(
+            -1, 1
+        ) + state.cat() * (~not_finished_agents).reshape(-1, 1)
+        possible_next_state = AgentState.from_array(array_state)
 
         obs_collided = _check_collision_with_obs(possible_next_state.pos, task_info.obs)
         agent_collided = _check_collision_wiht_agents(

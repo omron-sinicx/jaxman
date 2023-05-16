@@ -103,10 +103,10 @@ class Evaluator:
                     item_traj = None
                     goal_traj = None
                 else:
-                    # TODO
+
                     state_traj = jnp.concatenate(
                         (
-                            carry.experience.observations[:steps, :, :6],
+                            carry.experience.observations[:steps, :, :5],
                             jnp.expand_dims(carry.load_item_id_traj[:steps], -1),
                         ),
                         -1,
@@ -136,7 +136,6 @@ class Evaluator:
                     carry.trial_info,
                     dones,
                     self.instance.is_discrete,
-                    self.instance.is_diff_drive,
                     high_quality=False,
                     task_type=self.env_name,
                 )

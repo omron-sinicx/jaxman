@@ -84,7 +84,6 @@ class Carry(NamedTuple):
         state = State(
             agent_state=agent_state,
             load_item_id=jnp.arange(num_agents, dtype=int),
-            life=jnp.zeros(num_agents, dtype=int),
             item_pos=item_pos,
         )
         observations = _observe(state, task_info, trial_info)
@@ -145,19 +144,15 @@ def build_rollout_episode(
         Callable: jit-compiled rollout episode function
     """
     is_discrete = instance.is_discrete
-    use_maxmin_dqn = model_config.use_maxmin_dqn
     env_info, agent_info, _ = instance.export_info()
     _step = _build_rollout_step(
         env_info,
         agent_info,
         actor_fn,
-        use_maxmin_dqn,
     )
 
     _observe = _build_observe(env_info, agent_info)
-    _compute_intentions = _build_compute_agent_intention(
-        env_info, agent_info, actor_fn, use_maxmin_dqn
-    )
+    _compute_intentions = _build_compute_agent_intention(env_info, agent_info, actor_fn)
     _sample_actions = build_sample_agent_action(
         actor_fn, instance.is_discrete, instance.env_name, evaluate, model_config
     )

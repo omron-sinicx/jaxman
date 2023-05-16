@@ -12,29 +12,12 @@ from chex import Array, PRNGKey
 from jaxman.utils import split_obs_and_comm
 from omegaconf.dictconfig import DictConfig
 
-from .dataset import Buffer, Experience, PERTrainBatch
+from .dataset import Buffer, Experience, TrainBatch
 
 
 def _build_push_experience_to_buffer(
     gamma: float, use_k_step_learning: bool, k: int, T: int
 ) -> Callable:
-    def _build_apply_gamma(gamma: float, k: int):
-        weight = jnp.array([gamma**i for i in range(k)])
-        index = jnp.arange(T)
-
-        # to be vmap
-        def _apply_gamma(rewards: Array, index: Array):
-            rews = jax.lax.dynamic_slice_in_dim(rewards, index, k)
-            return jnp.sum(rews * weight)
-
-        def apply_gamma(rewards: Array):
-            rews = jax.vmap(_apply_gamma, in_axes=(None, 0))(rewards, index)
-            return rews
-
-        return jax.jit(apply_gamma)
-
-    apply_gamma = _build_apply_gamma(gamma, k)
-
     def _push_experience_to_buffer(buffer: Buffer, experience: Experience):
         idx = buffer.insert_index
         num_agents = experience.rewards.shape[-1]
@@ -62,15 +45,26 @@ def _build_push_experience_to_buffer(
                 experience.observations[1 : last_idx + 2, i]
             )
             idx += last_idx + 1
-            # PER
-            if buffer.size == 0:
-                buffer.priority[idx : idx + last_idx + 1] = 1
-            else:
-                prio = np.max(buffer.priority)
-                buffer.priority[idx : idx + last_idx + 1] = prio
 
             buffer.size = min(buffer.size + last_idx + 1, buffer.capacity)
             buffer.insert_index = idx % buffer.capacity
+
+    def _build_apply_gamma(gamma: float, k: int):
+        weight = jnp.array([gamma**i for i in range(k)])
+        index = jnp.arange(T)
+
+        # to be vmap
+        def _apply_gamma(rewards: Array, index: Array):
+            rews = jax.lax.dynamic_slice_in_dim(rewards, index, k)
+            return jnp.sum(rews * weight)
+
+        def apply_gamma(rewards: Array):
+            rews = jax.vmap(_apply_gamma, in_axes=(None, 0))(rewards, index)
+            return rews
+
+        return jax.jit(apply_gamma)
+
+    apply_gamma = _build_apply_gamma(gamma, k)
 
     def _push_k_step_learning_experience_to_buffer(
         buffer: Buffer, experience: Experience
@@ -117,12 +111,6 @@ def _build_push_experience_to_buffer(
             rewards = apply_gamma(rewards)
             buffer.rewards[idx : idx + last_idx + 1] = np.copy(rewards[: last_idx + 1])
             idx += last_idx + 1
-            # PER
-            if buffer.size == 0:
-                buffer.priority[idx : idx + last_idx + 1] = 1
-            else:
-                prio = np.max(buffer.priority)
-                buffer.priority[idx : idx + last_idx + 1] = prio
 
             buffer.size = min(buffer.size + last_idx + 1, buffer.capacity)
             buffer.insert_index = idx % buffer.capacity
@@ -139,39 +127,12 @@ def _build_sample_experience(
     batch_size = train_config.batch_size
     success_step_ratio = train_config.success_step_ratio
 
-    def _build_sample_index(
-        use_per: bool,
-    ):
-        buffer_index = jnp.arange(train_config.capacity)
-
-        @jax.jit
-        def per_sample(
-            key: PRNGKey,
-            priority: Array,
-            size: int,
-        ):
-            key, subkey = jax.random.split(key)
-            p = priority + 1e-8
-            p = (p * (buffer_index < size)) ** train_config.per_alpha
-            probs = p / jnp.sum(p)
-            index = jax.random.choice(
-                subkey, train_config.capacity, shape=(batch_size,), p=probs
-            )
-            probs = jax.vmap(lambda probs, idx: probs[idx], in_axes=(None, 0))(
-                probs, index
-            )
-            weight = ((1 / size) * (1 / probs)) ** train_config.per_beta
-            return index, weight, key
-
-        def uniform_sample(key: PRNGKey, _, size: int):
+    def _build_sample_index():
+        def uniform_sample(key: PRNGKey, size: int):
             index = np.random.randint(size, size=batch_size)
-            weight = np.ones((batch_size,))
-            return index, weight, key
+            return index, key
 
-        if use_per:
-            return per_sample
-        else:
-            return uniform_sample
+        return uniform_sample
 
     def _success_sample(buffer: Buffer, size: int):
         success_index = np.where(buffer.rewards > 0)[0]
@@ -182,38 +143,7 @@ def _build_sample_experience(
             index = np.random.randint(buffer.size, size=size)
         return index
 
-    def _batch_normalization(buffer: Buffer, sample_reward: np.array) -> np.array:
-        """normalized reward and update reward mean and std
-
-        Args:
-            buffer (Buffer): global buffer
-            sample_reward (np.array): rewards sampled as mini-batch
-
-        Returns:
-            np.array: standardized reward
-        """
-        if train_config.use_batch_norm:
-            mean = np.mean(sample_reward)
-            std = np.std(sample_reward) + 1e-8
-            if buffer.reward_mean is not None:
-                mean = buffer.reward_mean * train_config.batch_norm_tau + mean * (
-                    1 - train_config.batch_norm_tau
-                )
-                std = buffer.reward_var * train_config.batch_norm_tau + std * (
-                    1 - train_config.batch_norm_tau
-                )
-            buffer.reward_mean = mean
-            buffer.reward_var = std
-            if train_config.use_only_mean:
-                sample_reward = sample_reward - mean
-            if train_config.use_only_std:
-                sample_reward = sample_reward / std
-            else:
-                sample_reward = (sample_reward - mean) / std
-
-        return sample_reward
-
-    _sample_index = _build_sample_index(train_config.use_per)
+    _sample_index = _build_sample_index()
 
     def _sample_experience(
         key: PRNGKey,
@@ -223,14 +153,12 @@ def _build_sample_experience(
         num_items: int,
         item_dim: int,
     ):
-        index, weight, key = _sample_index(key, buffer.priority, buffer.size)
+        index, key = _sample_index(key, buffer.size)
         if train_config.use_separete_sample:
             success_index = _success_sample(
                 buffer, int(batch_size * success_step_ratio)
             )
-            success_weight = np.ones((int(batch_size * success_step_ratio),))
             index = np.concatenate((index, success_index))
-            weight = np.concatenate((weight, success_weight))
 
         all_obs = buffer.observations[index]
         agent_obs = split_obs_and_comm(
@@ -244,11 +172,7 @@ def _build_sample_experience(
             next_all_obs, num_agents, comm_dim, num_items, item_dim
         )
 
-        rews = _batch_normalization(buffer, rews)
-
-        data = PERTrainBatch(
-            index, agent_obs, acts, rews, masks, next_agent_obs, weight
-        )
+        data = TrainBatch(agent_obs, acts, rews, masks, next_agent_obs)
 
         return key, data
 
