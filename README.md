@@ -2,7 +2,6 @@
 <!-- |Grid| Diff Drive| Continous|
 | ------ | ------ | ------ | -->
 <img src=assets/grid.gif width=250>
-<img src=assets/diff_drive.gif width=250>
 <img src=assets/continuous.gif width=250>
 
 JAXMAN is a JAX-based library for multi-agent navigation. Our library can create environments with three different dynamics.
