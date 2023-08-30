@@ -137,32 +137,6 @@ def _build_compute_relative_positions(env_info: EnvInfo):
 
 def _build_get_other_agent_infos(env_info: EnvInfo):
     _compute_relative_pos = _build_compute_relative_positions(env_info)
-    _compute_relative_rot = _build_compute_relative_rot(env_info)
-
-    def _compute_relative_vel(
-        base_state: AgentState, target_state: AgentState
-    ) -> Array:
-        """compute ralative velocity of all agents
-
-        Args:
-            base_state (AgentState): origin state for calculate relative velocity
-            target_state (AgentState): target state for calulate relative velocity
-
-        Returns:
-            Array: relative velocity
-        """
-        base_rot = (base_state.rot + base_state.ang) % (2 * jnp.pi)
-        target_rot = (target_state.rot + target_state.ang) % (2 * jnp.pi)
-
-        base_vel = base_state.vel * jnp.hstack([jnp.sin(base_rot), jnp.cos(base_rot)])
-        target_vel = target_state.vel * jnp.hstack(
-            [jnp.sin(target_rot), jnp.cos(target_rot)]
-        )
-
-        relative_vel = jax.vmap(lambda target, base: target - base, in_axes=(None, 0))(
-            target_vel, base_vel
-        )
-        return relative_vel
 
     def _get_other_agent_infos(
         base_state: AgentState, target_state: AgentState
@@ -177,12 +151,7 @@ def _build_get_other_agent_infos(env_info: EnvInfo):
         """
         relative_pos = _compute_relative_pos(base_state, target_state.pos)
 
-        if not env_info.is_discrete:
-            relative_rot = _compute_relative_rot(base_state, target_state)
-            relative_vel = _compute_relative_vel(base_state, target_state)
-            return jnp.concatenate([relative_pos, relative_rot, relative_vel], axis=-1)
-        else:
-            return relative_pos
+        return relative_pos
 
     return jax.jit(_get_other_agent_infos)
 

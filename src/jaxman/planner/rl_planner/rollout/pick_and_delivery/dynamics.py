@@ -37,10 +37,7 @@ def _build_compute_agent_intention(
     _compute_next_state = _build_compute_next_env_state(env_info, agent_info)
     _compute_relative_pos = _build_get_relative_positions(env_info)
 
-    if not is_discrete:
-        comm_dim = 5  # (rel_pos, rot, vel, ang) * 2
-    else:
-        comm_dim = 2  # (rel_pos,) * 2
+    comm_dim = 2  # (rel_pos,)
     if use_intentions:
         comm_dim *= 2
     if use_hold_item_info:

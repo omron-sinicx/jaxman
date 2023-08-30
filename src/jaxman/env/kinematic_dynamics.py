@@ -344,73 +344,7 @@ def _build_get_relative_positions(env_info: EnvInfo):
         else:
             return relative_pos
 
-    def _compute_relative_rot(
-        base_state: AgentState, target_state: AgentState
-    ) -> Array:
-        """compute relative rotation (angle of agent) of all agents
-
-        Args:
-            base_state (AgentState): origin state for calculate relative rotation
-            target_state (AgentState): target state for calulate relative rotation
-
-        Returns:
-            Array: relative rotation
-        """
-        relative_rot = jax.vmap(lambda target, base: target - base, in_axes=(None, 0))(
-            target_state.rot, base_state.rot
-        )
-
-        if not is_discrete:
-            return (relative_rot + jnp.pi) % (2 * jnp.pi)
-        else:
-            return (relative_rot + 2) % 4
-
-    def _compute_relative_vel(
-        base_state: AgentState, target_state: AgentState
-    ) -> Array:
-        """compute ralative velocity of all agents
-
-        Args:
-            base_state (AgentState): origin state for calculate relative velocity
-            target_state (AgentState): target state for calulate relative velocity
-
-        Returns:
-            Array: relative velocity
-        """
-        base_rot = (base_state.rot + base_state.ang) % (2 * jnp.pi)
-        target_rot = (target_state.rot + target_state.ang) % (2 * jnp.pi)
-
-        base_vel = base_state.vel * jnp.hstack([jnp.sin(base_rot), jnp.cos(base_rot)])
-        target_vel = target_state.vel * jnp.hstack(
-            [jnp.sin(target_rot), jnp.cos(target_rot)]
-        )
-
-        relative_vel = jax.vmap(lambda target, base: target - base, in_axes=(None, 0))(
-            target_vel, base_vel
-        )
-        return relative_vel
-
-    def _get_relative_position(
-        base_state: AgentState, target_state: AgentState
-    ) -> Array:
-        """get all agent's current information
-
-        Args:
-            state (AgentState): agent's current state
-
-        Returns:
-            Array: all agent current informations
-        """
-        relative_pos = _compute_relative_pos(base_state, target_state)
-
-        if not is_discrete:
-            relative_rot = _compute_relative_rot(base_state, target_state)
-            relative_vel = _compute_relative_vel(base_state, target_state)
-            return jnp.concatenate([relative_pos, relative_rot, relative_vel], axis=-1)
-        else:
-            return relative_pos
-
-    return jax.jit(_get_relative_position)
+    return jax.jit(_compute_relative_pos)
 
 
 def _build_compute_neighbor_agent_mask(env_info: EnvInfo):

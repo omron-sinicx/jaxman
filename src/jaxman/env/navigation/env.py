@@ -48,10 +48,7 @@ class JaxMANEnv(gym.Env):
                 shape=(2,),
                 dtype=np.float32,
             )
-        if not self.is_discrete:
-            comm_dim = 5  # (rel_pos, rot, vel, ang) * 2
-        else:
-            comm_dim = 2  # (rel_pos,) * 2
+        comm_dim = 2 # (relative position)
         if self.use_intentions:
             comm_dim *= 2
 
@@ -63,7 +60,9 @@ class JaxMANEnv(gym.Env):
             low=-1.0, high=1.0, shape=(self.num_agents, comm_dim), dtype=np.float32
         )
         mask_space = Box(low=0.0, high=1.0, shape=(self.num_agents,))
+        mask_space = Box(low=0.0, high=1.0, shape=(self.num_agents,))
         item_pos_shape = item_mask_shape = Box(low=0.0, high=0.0, shape=(0,))
+
         self.obs_space = Dict(
             {
                 "obs": obs_space,
@@ -71,6 +70,7 @@ class JaxMANEnv(gym.Env):
                 "mask": mask_space,
                 "item_pos": item_pos_shape,
                 "item_mask": item_mask_shape,
+
             }
         )
 

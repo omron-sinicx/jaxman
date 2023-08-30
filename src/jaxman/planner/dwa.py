@@ -19,7 +19,7 @@ from jaxman.env.kinematic_dynamics import (
 from jaxman.utils import standardize
 
 
-def create_planner(env_info: EnvInfo, agent_info: AgentInfo):
+def create_planner(env_info: EnvInfo, agent_info: AgentInfo, is_individual_plannning = False):
     _compute_next_state = _build_compute_next_state(env_info)
     return DWAPlanner(
         compute_next_state=_compute_next_state,
@@ -27,6 +27,7 @@ def create_planner(env_info: EnvInfo, agent_info: AgentInfo):
         get_agent_dist=_get_agent_dist,
         agent_info=agent_info,
         use_acc=env_info.use_acc,
+        is_individual_planning = is_individual_plannning,
     )
 
 
@@ -45,6 +46,7 @@ class DWAPlanner:
     velocity_weight: float = 1.0
     distance_weight: float = 1.0
     goal_weight: float = 10.0
+    is_individual_planning: bool = False
 
     def __post_init__(self):
         self._act = self.build_act()
@@ -114,15 +116,20 @@ class DWAPlanner:
                 pos=next_states.pos,
             )  # (v_res x av_res, )
             # (v_res x av_res)
-            agent_dist_score = jax.vmap(
-                partial(
-                    self.get_agent_dist,
-                    all_pos=all_state.pos,
-                    agent_info=agent_info,
-                    self_id=self_id,
-                )
-            )(query_pos=next_states.pos).min(axis=1)
-            dist_score = jnp.minimum(obs_dist_score, agent_dist_score)
+
+            # ignore the existence of other agents
+            if self.is_individual_planning:
+                dist_score = obs_dist_score
+            else:
+                agent_dist_score = jax.vmap(
+                    partial(
+                        self.get_agent_dist,
+                        all_pos=all_state.pos,
+                        agent_info=agent_info,
+                        self_id=self_id,
+                    )
+                )(query_pos=next_states.pos).min(axis=1)
+                dist_score = jnp.minimum(obs_dist_score, agent_dist_score)
             dist_score = jnp.minimum(dist_score, self.distance_threshold)
             # (v_res x av_res, )
 

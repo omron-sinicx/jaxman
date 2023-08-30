@@ -108,6 +108,8 @@ class AgentObservation(NamedTuple):
         relative_positions (Array): relative agent positions
         intentions (Array): next step agent greedy intention (where greedy agent want to move)
         masks (Array): mask to restrict agent communication to neighboring agents
+        extra_obs (Optional[Array]): extra observation e.g., comulative cost, reward, etc. this will be concatenated to the observation
+        extra_comm (Optional[Array]): extra communication e.g., priority of other agents, etc. this will be concatenated to the communication
     """
 
     state: AgentState
@@ -117,6 +119,8 @@ class AgentObservation(NamedTuple):
     relative_positions: Optional[Array] = None
     intentions: Optional[Array] = None
     masks: Optional[Array] = None
+    extra_obs: Optional[Array] = None
+    extra_comm: Optional[Array] = None
 
     def cat(self, as_numpy=False) -> Array:
         """
@@ -136,12 +140,17 @@ class AgentObservation(NamedTuple):
                 self.scans,
             )
         )
+        if self.extra_obs is not None:
+            ret = jnp.hstack((ret, self.extra_obs))
         if self.planner_act is not None:
             ret = jnp.hstack((ret, self.planner_act))
         if self.relative_positions is not None:
             comm = jnp.concatenate((self.relative_positions, self.intentions), axis=-1)
             num_agents = ret.shape[0]
-            ret = jnp.hstack((ret, comm.reshape([num_agents, -1])))
+            if self.extra_comm is not None:
+                comm = jnp.concatenate((comm, self.extra_comm), axis=-1)
+        ret = jnp.hstack((ret, comm.reshape([num_agents, -1])))
+        
         if self.masks is not None:
             ret = jnp.hstack((ret, self.masks))
 
@@ -156,18 +165,21 @@ class AgentObservation(NamedTuple):
             Tuple[Array, Array, Array]: base_observation, communication, communication_mask
         """
         ret_state = self.state.cat()
-        ret = jnp.hstack(
+        obs = jnp.hstack(
             (
                 ret_state,
                 self.goals,
                 self.scans,
             )
         )
+        if self.extra_obs is not None:
+            obs = jnp.hstack((obs, self.extra_obs))
         if self.planner_act is not None:
-            obs = jnp.hstack((ret, self.planner_act))
-        else:
-            obs = ret
+            obs = jnp.hstack((obs, self.planner_act))
+        
         comm = jnp.concatenate((self.relative_positions, self.intentions), axis=-1)
+        if self.extra_comm is not None:
+            comm = jnp.concatenate((comm, self.extra_comm), axis=-1)
         mask = self.masks
 
         return ModelInput(obs, comm, mask)
