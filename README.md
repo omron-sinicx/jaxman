@@ -1,6 +1,6 @@
 # Jaxman: Jax-based implementation for multi-agent navigation
-<!-- |Grid| Diff Drive| Continous|
-| ------ | ------ | ------ | -->
+| <!-- | Grid | Diff Drive | Continous |
+| ---- | ---- | ---------- | --------- |>
 <img src=assets/grid.gif width=250>
 <img src=assets/continuous.gif width=250>
 
@@ -48,3 +48,18 @@ After the setup, you can run experiment as follow (expected run in docker-contai
 # python scripts/train_rl.py env.is_discrete=False # train RL agent in continous environmnet
 # python scripts/train_rl.py env.num_agents=10 # train RL agent in grid environment with 10 agent
 ```
+
+## Acknowledgments
+This project builds upon or incorporates code and ideas from [jaxmapp](https://github.com/omron-sinicx/jaxmapp), by Ryo Yonetani and Keisuke Okumura:
+
+**Description** 
+- Some parts of our implementation in the navigation environment are based on jaxmapp. 
+- Files that are implemented based on jaxmapp have it explicitly stated in their Docstring that they refer to jaxmapp.
+
+**Modification**
+- [jaxmapp](https://github.com/omron-sinicx/jaxmapp) is primarily designed for the path planning task, while our repository focuses on the navigation task. 
+- The main differences are as follows: 
+  - We have adjusted the original implementation from jaxmapp to be more navigation-focused due to the differences in the intended tasks.
+  - Added several codes suitable for **reinforcement learning applications**.
+
+For additional details, please refer to [jaxmapp]([https:](https://github.com/omron-sinicx/jaxmapp)).

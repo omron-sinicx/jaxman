@@ -2,6 +2,8 @@
 
 Author: Hikaru Asano
 Affiliation: OMRON SINIC X / University of Tokyo
+
+Credits: Code in this file is based on https://github.com/omron-sinicx/jaxmapp
 """
 from __future__ import annotations
 
